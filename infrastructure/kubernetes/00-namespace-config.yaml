@@ -1,0 +1,46 @@
+# Spec §48 note: these manifests run ONLY the application tiers (API, web)
+# in Kubernetes; Postgres and Redis are assumed to be managed services
+# reached over the network (RDS/ElastiCache, or any equivalent) - spec's
+# own wording separates "containerized services" from "managed PostgreSQL,
+# Redis" rather than asking for self-hosted StatefulSets of either.
+#
+# HONESTY NOTE: reviewed for internal consistency, never applied with
+# `kubectl apply` - this sandbox has no kubectl and no cluster. Run
+# `kubectl apply --dry-run=client -f .` and a server-side dry run against a
+# real cluster before applying for real.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: farmplatform
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: farmplatform-api-config
+  namespace: farmplatform
+data:
+  ENV: "production"
+  RATE_LIMIT_BACKEND: "redis"
+  CORS_ORIGINS: '["https://app.example-farm.co.ke"]'
+  PUBLIC_SITE_BASE_URL: "https://app.example-farm.co.ke"
+  OTEL_EXPORTER_OTLP_ENDPOINT: ""
+---
+# Template only - never commit a real one. Create the actual Secret out of
+# band (kubectl create secret generic, a sealed-secret, or your cluster's
+# secret manager - spec §49: never commit secrets).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: farmplatform-api-secrets
+  namespace: farmplatform
+type: Opaque
+stringData:
+  DATABASE_URL: "postgresql+psycopg://REPLACE:REPLACE@REPLACE:5432/farmdb"
+  REDIS_URL: "redis://REPLACE:6379/0"
+  JWT_SECRET: "REPLACE_WITH_A_REAL_SECRET"
+  MOCK_PAYMENT_SECRET: "REPLACE_WITH_A_REAL_SECRET"
+  DARAJA_CONSUMER_KEY: "REPLACE"
+  DARAJA_CONSUMER_SECRET: "REPLACE"
+  DARAJA_PASSKEY: "REPLACE"
+  STRIPE_SECRET_KEY: "REPLACE"
+  STRIPE_WEBHOOK_SECRET: "REPLACE"

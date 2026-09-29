@@ -1,0 +1,24 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* See app/layout.tsx for why these are system-font fallbacks rather than
+     next/font/google calls in this environment. */
+  --font-fraunces: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+  --font-plex-sans: -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-plex-mono: "SF Mono", Consolas, "Liberation Mono", monospace;
+}
+
+@layer base {
+  body {
+    @apply bg-paper text-ink font-body antialiased;
+  }
+  ::selection {
+    @apply bg-brass/30;
+  }
+  :focus-visible {
+    outline: 2px solid theme("colors.brass.DEFAULT");
+    outline-offset: 2px;
+  }
+}

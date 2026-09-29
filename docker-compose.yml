@@ -1,0 +1,53 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: farm
+      POSTGRES_PASSWORD: farm
+      POSTGRES_DB: farmdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U farm -d farmdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  api:
+    build:
+      context: ./apps/api
+      # No explicit target - builds the last stage ("runtime") of the
+      # multi-stage Dockerfile by default, which is what we want here too.
+    env_file:
+      - ./apps/api/.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://farm:farm@postgres:5432/farmdb
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      # Bind-mounting source over the image's /app is a local-dev convenience
+      # for --reload; it also means the image's non-root `appuser` ownership
+      # doesn't fully apply here (mounted files show host UID/GID inside the
+      # container). That's an accepted dev-only trade-off - a production
+      # deployment would NOT bind-mount source and would run the built image
+      # unmodified, where the non-root user in the Dockerfile applies fully.
+      - ./apps/api:/app
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+
+volumes:
+  pgdata:

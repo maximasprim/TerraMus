@@ -1,0 +1,26 @@
+# Assumes an ingress-nginx controller and cert-manager are already installed
+# on the cluster (neither is part of this app - standard cluster add-ons).
+# Replace host/secretName/cluster-issuer with real values.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: farmplatform-api
+  namespace: farmplatform
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: ["api.example-farm.co.ke"]
+      secretName: farmplatform-api-tls
+  rules:
+    - host: api.example-farm.co.ke
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: farmplatform-api
+                port: { number: 80 }

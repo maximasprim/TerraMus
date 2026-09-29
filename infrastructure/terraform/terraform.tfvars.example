@@ -1,0 +1,10 @@
+# Copy to terraform.tfvars (already gitignored) and fill in real values, or
+# pass everything via TF_VAR_* environment variables in CI instead - never
+# commit actual secrets here (spec §49).
+
+environment = "production"
+aws_region  = "af-south-1"
+api_image   = "111111111111.dkr.ecr.af-south-1.amazonaws.com/farmplatform-api:CHANGEME"
+domain_name = "" # e.g. "api.example-farm.co.ke" - leave blank for HTTP-only via the raw ALB DNS name
+db_password = "CHANGEME"
+jwt_secret  = "CHANGEME"
