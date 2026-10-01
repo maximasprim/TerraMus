@@ -21,6 +21,13 @@ class DashboardSummary(BaseModel):
     estimated_monthly_profit: Decimal
     low_stock_item_count: int
     vaccinations_due_count: int
+    # Crop figures. dashboard_summary() has always computed these, but without
+    # declared fields Pydantic silently dropped them from the response, so the
+    # dashboard showed "undefined"/"NaN". Defaults keep any other constructor safe.
+    total_crop_plantings: int = 0
+    active_crop_plantings: int = 0
+    crop_planting_value: Decimal = Decimal("0")
+    low_stock_crop_listing_count: int = 0
 
 
 class AnimalProfitabilityDetail(BaseModel):

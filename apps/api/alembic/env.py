@@ -19,6 +19,7 @@ from app.modules.dairy import models as dairy_models  # noqa: F401
 from app.modules.inventory import models as inventory_models  # noqa: F401
 from app.modules.customers import models as customers_models  # noqa: F401
 from app.modules.commerce import models as commerce_models  # noqa: F401
+from app.modules.inquiries import models as inquiries_models  # noqa: F401
 from app.modules.payments import models as payments_models  # noqa: F401
 from app.modules.finance import models as finance_models  # noqa: F401
 from app.modules.notifications import models as notifications_models  # noqa: F401

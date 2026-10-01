@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.identity.models import Organization
+from app.modules.commerce.image_service import ImageRef, image_refs_by_listing
 from app.modules.commerce.models import Listing, Order
 from app.modules.commerce import schemas as commerce_schemas
 from app.modules.commerce.service import (
@@ -28,19 +29,26 @@ async def get_org_by_slug(db: AsyncSession, org_slug: str) -> Organization:
     return org
 
 
-def _public_listing_from_animal(listing: Listing, animal: Animal, county: str | None) -> schemas.PublicListingOut:
+def _image_refs(refs: list[ImageRef] | None) -> list[schemas.PublicListingImageOut]:
+    return [schemas.PublicListingImageOut(id=r.id, url=r.url, thumb_url=r.thumb_url) for r in (refs or [])]
+
+
+def _public_listing_from_animal(
+    listing: Listing, animal: Animal, county: str | None, image_refs: list[ImageRef] | None = None,
+) -> schemas.PublicListingOut:
     return schemas.PublicListingOut(
         slug=listing.slug, title=listing.title, description=listing.description,
         pricing_type=listing.pricing_type, price=listing.price, listing_kind="animal",
         featured=listing.featured, county=county,
         species=animal.species, breed=animal.breed, sex=animal.sex,
         date_of_birth=animal.date_of_birth, current_weight=animal.current_weight,
-        health_status=animal.health_status,
+        health_status=animal.health_status, images=_image_refs(image_refs),
     )
 
 
 async def _public_listing_from_crop(
     db: AsyncSession, listing: Listing, planting: CropPlanting, county: str | None,
+    image_refs: list[ImageRef] | None = None,
 ) -> schemas.PublicListingOut:
     available = await get_available_crop_quantity(db, listing.organization_id, planting.id)
     return schemas.PublicListingOut(
@@ -48,7 +56,7 @@ async def _public_listing_from_crop(
         pricing_type=listing.pricing_type, price=listing.price, listing_kind="crop_produce",
         featured=listing.featured, county=county,
         crop_type=planting.crop_type, variety=planting.variety, unit=listing.unit,
-        quantity_available=available, is_perennial=planting.is_perennial,
+        quantity_available=available, is_perennial=planting.is_perennial, images=_image_refs(image_refs),
     )
 
 
@@ -56,6 +64,8 @@ async def list_public_listings(
     db: AsyncSession, org_id: uuid.UUID, species: str | None = None, crop_type: str | None = None,
 ) -> list[schemas.PublicListingOut]:
     results: list[schemas.PublicListingOut] = []
+    animal_rows: list = []
+    crop_rows: list = []
 
     # crop_type being set means the shopper is specifically browsing crop
     # produce - skip the animal query entirely rather than returning an
@@ -70,8 +80,7 @@ async def list_public_listings(
         )
         if species:
             animal_query = animal_query.where(Animal.species == species)
-        animal_rows = await db.execute(animal_query)
-        results.extend(_public_listing_from_animal(listing, animal, county) for listing, animal, county in animal_rows.all())
+        animal_rows = (await db.execute(animal_query)).all()
 
     if not species:
         crop_query = (
@@ -82,9 +91,17 @@ async def list_public_listings(
         )
         if crop_type:
             crop_query = crop_query.where(CropPlanting.crop_type == crop_type)
-        crop_rows = await db.execute(crop_query)
-        for listing, planting, county in crop_rows.all():
-            results.append(await _public_listing_from_crop(db, listing, planting, county))
+        crop_rows = (await db.execute(crop_query)).all()
+
+    # One batched query for every listing's photos (no per-listing round trip).
+    images = await image_refs_by_listing(db, [row[0].id for row in animal_rows] + [row[0].id for row in crop_rows])
+
+    results.extend(
+        _public_listing_from_animal(listing, animal, county, images.get(listing.id))
+        for listing, animal, county in animal_rows
+    )
+    for listing, planting, county in crop_rows:
+        results.append(await _public_listing_from_crop(db, listing, planting, county, images.get(listing.id)))
 
     results.sort(key=lambda r: r.featured, reverse=True)  # created_at ordering is already per-kind from the DB;
     return results                                        # featured-first is the one cross-kind guarantee that matters
@@ -100,7 +117,8 @@ async def get_public_listing_by_slug(db: AsyncSession, org_id: uuid.UUID, slug: 
     row = (await db.execute(animal_query)).first()
     if row:
         listing, animal, county = row
-        return _public_listing_from_animal(listing, animal, county)
+        images = await image_refs_by_listing(db, [listing.id])
+        return _public_listing_from_animal(listing, animal, county, images.get(listing.id))
 
     crop_query = (
         select(Listing, CropPlanting, Farm.county)
@@ -111,7 +129,8 @@ async def get_public_listing_by_slug(db: AsyncSession, org_id: uuid.UUID, slug: 
     row = (await db.execute(crop_query)).first()
     if row:
         listing, planting, county = row
-        return await _public_listing_from_crop(db, listing, planting, county)
+        images = await image_refs_by_listing(db, [listing.id])
+        return await _public_listing_from_crop(db, listing, planting, county, images.get(listing.id))
 
     raise HTTPException(status.HTTP_404_NOT_FOUND, "Listing not found")
 

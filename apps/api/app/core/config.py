@@ -37,6 +37,13 @@ class Settings(BaseSettings):
     # "redis" opts into the shared-store limiter using REDIS_URL above.
     RATE_LIMIT_BACKEND: str = "memory"  # memory | redis
 
+    # How many reverse proxies / load balancers sit in front of the API and
+    # append to X-Forwarded-For (e.g. 1 behind a single AWS ALB). 0 (default)
+    # means "trust only the socket peer" - the previous behaviour. Without
+    # this, behind a load balancer EVERY visitor shares the balancer's IP, so
+    # per-IP rate limits would throttle the whole site as one client.
+    TRUSTED_PROXY_COUNT: int = 0
+
     # Spec §47 - OpenTelemetry tracing is entirely opt-in: unset (the
     # default) means core/observability.py's setup_tracing() is a no-op and
     # nothing OTel-related is even imported. Set to a real collector's OTLP
@@ -58,6 +65,17 @@ class Settings(BaseSettings):
     # Payments (spec §21-22, §49) - never commit real values; see .env.example.
     PAYMENT_PROVIDER_MODE: str = "mock"  # mock | mpesa | stripe (per-request provider is also selectable)
     MOCK_PAYMENT_SECRET: str = "mock-payment-secret-change-me"
+    # The mock provider marks orders paid with no real money, so it is
+    # controlled explicitly. None (default) = on for development/test ENVs and
+    # OFF for any production-like ENV. True = allow, but only honoured when
+    # MOCK_PAYMENT_SECRET is a strong, non-placeholder value (see
+    # core/security_checks.py). False = always off.
+    ALLOW_MOCK_PAYMENTS: bool | None = None
+
+    # Abandoned guest orders hold inventory (animal reserved / crop stock
+    # committed). They're auto-cancelled after these windows; 0 disables a rule.
+    GUEST_ORDER_TTL_MINUTES: int = 120
+    PAYMENT_PENDING_TTL_HOURS: int = 24
 
     DARAJA_CONSUMER_KEY: str = ""
     DARAJA_CONSUMER_SECRET: str = ""
@@ -78,6 +96,16 @@ class Settings(BaseSettings):
     VERCEL_API_TOKEN: str = ""
     VERCEL_PROJECT_ID: str = ""
     VERCEL_TEAM_ID: str = ""
+
+    # Listing-photo storage (commerce/storage.py). "database" (default) keeps
+    # photo bytes in Postgres with zero setup; "supabase" stores them in a
+    # Supabase Storage bucket and serves them from its CDN. The bucket must
+    # exist and be PUBLIC; the service-role key is server-side only.
+    STORAGE_BACKEND: str = "database"  # database | supabase
+    SUPABASE_URL: str = ""             # e.g. https://<project-ref>.supabase.co
+    SUPABASE_SECRET_KEY: str = ""            # sb_secret_... (Settings > API Keys) - preferred
+    SUPABASE_SERVICE_ROLE_KEY: str = ""
+    SUPABASE_STORAGE_BUCKET: str = "listing-images"
 
 
 @lru_cache

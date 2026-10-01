@@ -46,6 +46,29 @@ class ListingOut(BaseModel):
     featured: bool
     is_active: bool
     created_at: datetime
+    # Photo summary for the admin grid. Populated by GET /listings; every
+    # other endpoint returning ListingOut just reports the defaults.
+    cover_image_id: uuid.UUID | None = None
+    cover_thumb_url: str | None = None  # direct bucket URL when photos live in storage (else use the media endpoint)
+    image_count: int = 0
+
+
+class ListingImageOut(BaseModel):
+    """Photo metadata only. Bytes are served by /api/v1/media, or - when the
+    photo lives in a storage bucket - directly from `url` / `thumb_url`."""
+    id: uuid.UUID
+    position: int
+    width: int
+    height: int
+    size_bytes: int
+    content_type: str
+    url: str | None = None
+    thumb_url: str | None = None
+
+
+class ListingImageOrder(BaseModel):
+    """The listing's photo ids in their new display order (first = cover)."""
+    image_ids: list[uuid.UUID] = Field(min_length=1, max_length=20)
 
 
 class ListingUpdate(BaseModel):

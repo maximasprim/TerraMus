@@ -9,6 +9,8 @@ from sqlalchemy import text
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.middleware import RequestContextMiddleware, SecurityHeadersMiddleware
+from app.core.security_checks import security_warnings
+from app.modules.commerce.storage import config_from_settings as storage_config, config_warning as storage_warning
 from app.core.observability import PrometheusMiddleware, register_metrics_endpoint, setup_tracing
 from app.modules.identity.router import router as auth_router, users_router, audit_router, organization_router
 from app.modules.farm.router import router as farm_router
@@ -23,7 +25,7 @@ from app.modules.customers.router import router as customers_router
 from app.modules.procurement.router import router as procurement_router
 from app.modules.employees.router import router as employees_router
 from app.modules.assets.router import router as assets_router
-from app.modules.commerce.router import listings_router, reservations_router, orders_router
+from app.modules.commerce.router import listings_router, reservations_router, orders_router, media_router
 from app.modules.payments.router import router as payments_router, webhooks_router as payments_webhooks_router
 from app.modules.finance.router import router as finance_router
 from app.modules.finance.handlers import register_finance_event_handlers
@@ -35,6 +37,7 @@ from app.modules.public.router import router as public_router, domain_router
 from app.modules.accounts.router import public_account_router, account_router
 from app.modules.search.router import router as search_router
 from app.modules.bulk_import.router import router as bulk_import_router
+from app.modules.inquiries.router import router as inquiries_router, public_router as inquiries_public_router
 
 # --- platform-admin / billing (superuser console + subscriptions) ---------
 from app.modules.platform_admin.router import router as platform_admin_router
@@ -48,6 +51,16 @@ logging.basicConfig(
     level=logging.INFO if not settings.DEBUG else logging.DEBUG,
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
 )
+
+# Loud (but non-fatal) startup warnings for insecure production-like config.
+for _warning in security_warnings(
+    settings.ENV, settings.JWT_SECRET, settings.MOCK_PAYMENT_SECRET, settings.ALLOW_MOCK_PAYMENTS,
+):
+    logging.getLogger("app.security").warning(_warning)
+
+_storage_warning = storage_warning(storage_config(settings))
+if _storage_warning:
+    logging.getLogger("app.storage").warning(_storage_warning)
 
 
 @asynccontextmanager
@@ -71,9 +84,25 @@ async def lifespan(app: FastAPI):
             except Exception:
                 logging.getLogger("app.billing").exception("subscription lifecycle check failed")
 
+    async def _order_expiry_loop():
+        """Cancels abandoned guest orders so they can't hold inventory
+        forever (commerce/expiry.py). Every 10 minutes; safe on several
+        replicas (a second runner just sees the order already cancelled)."""
+        from app.modules.commerce.expiry import expire_stale_guest_orders
+
+        while True:
+            await asyncio.sleep(10 * 60)
+            try:
+                async with AsyncSessionLocal() as db:
+                    await expire_stale_guest_orders(db)
+            except Exception:
+                logging.getLogger("app.orders").exception("stale guest order expiry failed")
+
     task = asyncio.create_task(_lifecycle_loop())
+    order_task = asyncio.create_task(_order_expiry_loop())
     yield
     task.cancel()
+    order_task.cancel()
 
 
 app = FastAPI(
@@ -143,6 +172,9 @@ app.include_router(public_account_router)
 app.include_router(account_router)
 app.include_router(search_router)
 app.include_router(bulk_import_router)
+app.include_router(media_router)
+app.include_router(inquiries_router)
+app.include_router(inquiries_public_router)
 
 # --- platform-admin / billing ----------------------------------------------
 app.include_router(platform_admin_router)

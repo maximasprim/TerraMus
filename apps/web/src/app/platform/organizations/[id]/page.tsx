@@ -112,8 +112,7 @@ export default function OrganizationDetailPage() {
       </div>
       <p className="text-xs text-muted">
         Browse this organization&apos;s data by module above - health, breeding, and dairy records
-        are per-animal and aren&apos;t covered by this tab bar; use the API directly for those
-        (see HOW_TO_APPLY.md).
+        are per-animal and aren&apos;t covered by this tab bar; use the API directly for those.
       </p>
     </PlatformShell>
   );

@@ -66,7 +66,7 @@ export function PlatformShell({ children }: { children: React.ReactNode }) {
           Sign out
         </button>
       </aside>
-      <main className="flex-1 overflow-y-auto p-8">{children}</main>
+      <main className="flex-1 overflow-y-auto p-3">{children}</main>
     </div>
   );
 }

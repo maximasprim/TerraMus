@@ -4,7 +4,9 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AdminShell } from "@/components/admin-shell";
 import { Card, Button, Input, Select, Textarea, Modal, ErrorState, EmptyState, TagChip } from "@/components/ui";
+import { ListingPhotos } from "@/components/listing-photos";
 import { apiFetch, ApiError } from "@/lib/api";
+import { listingImageUrl } from "@/lib/shop-utils";
 import type { Listing, Animal, CropPlanting } from "@/lib/types";
 
 const PRICING_TYPES = ["fixed", "negotiable", "price_on_request"] as const;
@@ -13,6 +15,7 @@ export default function ListingsPage() {
   const queryClient = useQueryClient();
   const [modalOpen, setModalOpen] = useState(false);
   const [editingListing, setEditingListing] = useState<Listing | null>(null);
+  const [photosListing, setPhotosListing] = useState<Listing | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editError, setEditError] = useState<string | null>(null);
 
@@ -104,6 +107,10 @@ export default function ListingsPage() {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           {listingsQuery.data.map((listing) => (
             <Card key={listing.id} className="flex flex-col gap-2">
+              {listing.cover_image_id && (
+                // eslint-disable-next-line @next/next/no-img-element -- served by the API
+                <img src={listing.cover_thumb_url ?? listingImageUrl(listing.cover_image_id, true)} alt="" className="mb-1 h-36 w-full rounded-md object-cover" />
+              )}
               <div className="flex items-start justify-between">
                 <h2 className="font-display text-lg text-forest">{listing.title}</h2>
                 {listing.featured && (
@@ -132,6 +139,9 @@ export default function ListingsPage() {
                   onClick={() => { setEditError(null); setEditingListing(listing); }}
                 >
                   Edit
+                </Button>
+                <Button variant="ghost" className="text-xs" onClick={() => setPhotosListing(listing)}>
+                  Photos ({listing.image_count ?? 0})
                 </Button>
                 <Button
                   variant="ghost"
@@ -166,6 +176,9 @@ export default function ListingsPage() {
             onSubmit={(body) => update.mutate({ id: editingListing.id, body })}
           />
         )}
+      </Modal>
+      <Modal open={!!photosListing} onClose={() => setPhotosListing(null)} title={photosListing ? `Photos - ${photosListing.title}` : "Photos"}>
+        {photosListing && <ListingPhotos listingId={photosListing.id} />}
       </Modal>
     </AdminShell>
   );

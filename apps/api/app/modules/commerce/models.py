@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime, timezone
 
-from sqlalchemy import String, Numeric, Date, DateTime, Boolean, ForeignKey, Text
+from sqlalchemy import String, Numeric, Date, DateTime, Boolean, ForeignKey, Text, Integer, LargeBinary
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -40,6 +40,32 @@ class Listing(Base, UUIDPKMixin, TimestampMixin):
     low_stock_threshold: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)  # crop-produce only - alert when available quantity falls at/below this
     featured: Mapped[bool] = mapped_column(Boolean, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+
+
+class ListingImage(Base, UUIDPKMixin, TimestampMixin):
+    """One photo of a listing. `position` 0 is the cover (shown on the home
+    page / store grid); the product page shows every photo in position order.
+    `data`/`thumb_data` hold the *processed* JPEG bytes (see images.py) and are
+    `deferred` so ordinary queries never drag megabytes of blob into memory -
+    only the media endpoint selects them explicitly."""
+    __tablename__ = "listing_images"
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    listing_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("listings.id", ondelete="CASCADE"), index=True
+    )
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    content_type: Mapped[str] = mapped_column(String(32), default="image/jpeg")
+    width: Mapped[int] = mapped_column(Integer)
+    height: Mapped[int] = mapped_column(Integer)
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    # Bytes live EITHER in these blob columns (STORAGE_BACKEND=database) OR in a
+    # bucket object referenced by the keys below (STORAGE_BACKEND=supabase); a
+    # DB CHECK guarantees at least one. Rows of both kinds can coexist.
+    data: Mapped[bytes | None] = mapped_column(LargeBinary, deferred=True, nullable=True)
+    thumb_data: Mapped[bytes | None] = mapped_column(LargeBinary, deferred=True, nullable=True)
+    storage_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    thumb_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
 
 class Reservation(Base, UUIDPKMixin, TimestampMixin):

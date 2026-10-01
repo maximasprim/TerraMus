@@ -68,6 +68,8 @@ resource "aws_ecs_task_definition" "api" {
       { name = "REDIS_URL", value = "redis://${aws_elasticache_cluster.main.cache_nodes[0].address}:6379/0" },
       { name = "JWT_SECRET", value = var.jwt_secret },
       { name = "RATE_LIMIT_BACKEND", value = "redis" },
+      { name = "TRUSTED_PROXY_COUNT", value = "1" },     # one ALB in front - lets per-IP rate limits see real visitors
+      { name = "ALLOW_MOCK_PAYMENTS", value = "false" }, # mock provider must never be live in AWS
       { name = "S3_BUCKET", value = aws_s3_bucket.documents.bucket },
       { name = "AWS_REGION", value = var.aws_region },
     ]

@@ -1,13 +1,14 @@
 import uuid
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi.responses import RedirectResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.modules.identity.deps import require_permission
 from app.modules.identity.models import User
-from app.modules.commerce import schemas, service
+from app.modules.commerce import image_service, schemas, service
 
 listings_router = APIRouter(prefix="/api/v1/listings", tags=["commerce"])
 reservations_router = APIRouter(prefix="/api/v1/reservations", tags=["commerce"])
@@ -27,7 +28,9 @@ async def list_listings(
     filters = schemas.ListingFilter(
         species=species, crop_type=crop_type, min_price=min_price, max_price=max_price, featured_only=featured_only,
     )
-    return await service.list_listings(db, user.organization_id, filters)
+    listings = await service.list_listings(db, user.organization_id, filters)
+    await image_service.attach_cover_info(db, listings)
+    return listings
 
 
 @listings_router.post("", response_model=schemas.ListingOut, status_code=201)
@@ -159,3 +162,71 @@ async def change_order_status(
     db: AsyncSession = Depends(get_db),
 ):
     return await service.change_order_status(db, user.organization_id, order_id, user.id, req)
+
+
+# ------------------------------------------------------------ Listing photos --
+
+@listings_router.get("/{listing_id}/images", response_model=list[schemas.ListingImageOut])
+async def list_listing_images(
+    listing_id: uuid.UUID,
+    user: User = Depends(require_permission("livestock.read")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await image_service.list_images(db, user.organization_id, listing_id)
+
+
+@listings_router.post("/{listing_id}/images", response_model=list[schemas.ListingImageOut], status_code=201)
+async def upload_listing_images(
+    listing_id: uuid.UUID,
+    files: list[UploadFile] = File(...),
+    user: User = Depends(require_permission("listings.manage")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload one or more photos (multipart field name: `files`). JPEG/PNG/WebP,
+    up to 5 MB each and 8 per listing; validated and re-encoded server-side."""
+    return await image_service.add_images(db, user.organization_id, listing_id, files)
+
+
+@listings_router.put("/{listing_id}/images/order", response_model=list[schemas.ListingImageOut])
+async def reorder_listing_images(
+    listing_id: uuid.UUID,
+    req: schemas.ListingImageOrder,
+    user: User = Depends(require_permission("listings.manage")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await image_service.reorder_images(db, user.organization_id, listing_id, req.image_ids)
+
+
+@listings_router.delete("/{listing_id}/images/{image_id}", status_code=204)
+async def delete_listing_image(
+    listing_id: uuid.UUID,
+    image_id: uuid.UUID,
+    user: User = Depends(require_permission("listings.manage")),
+    db: AsyncSession = Depends(get_db),
+):
+    await image_service.delete_image(db, user.organization_id, listing_id, image_id)
+    return Response(status_code=204)
+
+
+# Public, unauthenticated photo bytes. Deliberately keyed only by the photo's
+# unguessable UUID (no org slug) so <img> tags work identically on the public
+# storefront and inside the admin app. Photo ids never change content, so
+# responses are cacheable forever.
+media_router = APIRouter(prefix="/api/v1/media", tags=["media"])
+_IMMUTABLE = {"Cache-Control": "public, max-age=31536000, immutable"}
+
+
+def _media_response(source: "image_service.ImageSource"):
+    if source.redirect_url:  # photo lives in the storage bucket - send the browser to its CDN
+        return RedirectResponse(source.redirect_url, status_code=302, headers={"Cache-Control": "public, max-age=86400"})
+    return Response(content=source.data, media_type=source.content_type, headers=_IMMUTABLE)
+
+
+@media_router.get("/listing-images/{image_id}")
+async def listing_image(image_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    return _media_response(await image_service.get_image_source(db, image_id, thumb=False))
+
+
+@media_router.get("/listing-images/{image_id}/thumb")
+async def listing_image_thumb(image_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    return _media_response(await image_service.get_image_source(db, image_id, thumb=True))

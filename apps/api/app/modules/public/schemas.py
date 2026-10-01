@@ -5,6 +5,16 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
+class PublicListingImageOut(BaseModel):
+    """A photo reference; list order = display order, cover first. When the
+    photo lives in a storage bucket, `url`/`thumb_url` are direct CDN links;
+    otherwise they're null and the frontend builds the URL from the id
+    (/api/v1/media/listing-images/{id}[/thumb])."""
+    id: uuid.UUID
+    url: str | None = None
+    thumb_url: str | None = None
+
+
 class PublicListingOut(BaseModel):
     """Deliberately narrow - the allowlist principle from spec §38 ('never
     expose sensitive internal information publicly') applies here just as
@@ -40,6 +50,8 @@ class PublicListingOut(BaseModel):
     unit: str | None = None
     quantity_available: Decimal | None = None
     is_perennial: bool | None = None
+    # photos, cover first (empty when the farm hasn't uploaded any)
+    images: list[PublicListingImageOut] = []
 
 
 class AnimalQRProfileOut(BaseModel):

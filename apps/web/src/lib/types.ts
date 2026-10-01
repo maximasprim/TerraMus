@@ -251,6 +251,40 @@ export interface Listing {
   featured: boolean;
   is_active: boolean;
   created_at: string;
+  // photo summary (GET /listings only; absent/0 elsewhere)
+  cover_image_id?: string | null;
+  cover_thumb_url?: string | null;
+  image_count?: number;
+}
+
+export interface ListingImage {
+  id: string;
+  position: number;
+  width: number;
+  height: number;
+  size_bytes: number;
+  content_type: string;
+  // direct CDN links when the photo lives in a storage bucket (null = served by the API)
+  url?: string | null;
+  thumb_url?: string | null;
+}
+
+export interface Inquiry {
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  message: string;
+  listing_slug: string | null;
+  status: "new" | "read" | "replied" | "archived";
+  created_at: string;
+}
+
+export interface InquirySummary {
+  new: number;
+  read: number;
+  replied: number;
+  archived: number;
 }
 
 export interface OrderItem {
@@ -421,6 +455,8 @@ export interface PublicListing {
   unit: string | null;
   quantity_available: string | null;
   is_perennial: boolean | null;
+  // photos, cover first; empty/absent when the farm has not uploaded any
+  images?: { id: string; url?: string | null; thumb_url?: string | null }[];
 }
 
 export interface PublicFarmProfile {

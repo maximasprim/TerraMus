@@ -5,6 +5,7 @@ from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.middleware import public_order_limit, public_payment_limit
 from app.modules.public import schemas, service
 from app.modules.commerce import schemas as commerce_schemas
 from app.modules.payments import schemas as payment_schemas
@@ -102,7 +103,10 @@ async def public_banners(org_slug: str, db: AsyncSession = Depends(get_db)):
     return await service.list_public_banners(db, org.id)
 
 
-@router.post("/orders", response_model=schemas.PublicOrderConfirmation, status_code=201)
+@router.post(
+    "/orders", response_model=schemas.PublicOrderConfirmation, status_code=201,
+    dependencies=[Depends(public_order_limit)],
+)
 async def public_create_order(org_slug: str, req: schemas.PublicOrderCreate, db: AsyncSession = Depends(get_db)):
     """Guest checkout (spec §69) - no login required. Reuses the same
     concurrency-safe row-locking order-creation logic staff use
@@ -119,7 +123,10 @@ async def public_get_order(org_slug: str, order_id: uuid.UUID, email: str = Quer
     return await service.get_guest_order(db, org.id, order_id, email)
 
 
-@router.post("/orders/{order_id}/pay/{provider}", response_model=payment_schemas.PaymentOut, status_code=201)
+@router.post(
+    "/orders/{order_id}/pay/{provider}", response_model=payment_schemas.PaymentOut, status_code=201,
+    dependencies=[Depends(public_payment_limit)],
+)
 async def public_initiate_payment(
     org_slug: str, order_id: uuid.UUID, provider: str,
     req: schemas.PublicPaymentRequest, db: AsyncSession = Depends(get_db),

@@ -17,7 +17,7 @@ const config: Config = {
         },
         brass: {
           DEFAULT: "#B8862B",  // dry-season grass / brass ear-tag - the accent
-          dark: "#93692050",
+          dark: "#936920",
           light: "#D9A84C",
         },
         clay: "#A6432E",       // muted brick red for errors - distinct from brass

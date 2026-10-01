@@ -70,6 +70,9 @@ export async function apiFetch<T>(
       "Content-Type": "application/json",
       ...(headers as Record<string, string> | undefined),
     };
+    // Multipart uploads: the browser must generate the Content-Type (with its
+    // boundary) itself - forcing application/json would break the request.
+    if (typeof FormData !== "undefined" && rest.body instanceof FormData) delete finalHeaders["Content-Type"];
     if (auth && token) finalHeaders.Authorization = `Bearer ${token}`;
     return fetch(`${API_BASE}${path}`, { ...rest, headers: finalHeaders });
   };

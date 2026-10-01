@@ -9,6 +9,8 @@ from collections import defaultdict, deque
 from fastapi import Request, HTTPException, status
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from app.core.security_checks import resolve_client_ip
+
 logger = logging.getLogger("app.requests")
 
 
@@ -137,6 +139,61 @@ def _get_auth_limiter():
     return auth_rate_limiter
 
 
+def client_ip(request: Request) -> str:
+    """Real client IP for rate limiting. Identical to the old behaviour
+    (socket peer) unless TRUSTED_PROXY_COUNT is set - see core/config.py."""
+    from app.core.config import get_settings
+    return resolve_client_ip(
+        request.headers.get("x-forwarded-for"),
+        request.client.host if request.client else None,
+        get_settings().TRUSTED_PROXY_COUNT,
+    )
+
+
 async def rate_limit_auth(request: Request) -> None:
-    client_ip = request.client.host if request.client else "unknown"
-    await _get_auth_limiter().check(f"auth:{client_ip}")
+    await _get_auth_limiter().check(f"auth:{client_ip(request)}")
+
+
+class PublicRateLimit:
+    """Named per-IP limiter for *unauthenticated write* endpoints (guest
+    checkout, contact form, guest payment initiation). Usable directly as a
+    FastAPI dependency: `dependencies=[Depends(public_order_limit)]`. Honours
+    RATE_LIMIT_BACKEND (memory or shared redis) like the auth limiter."""
+
+    def __init__(self, name: str, max_requests: int, window_seconds: int):
+        self.name = name
+        self.max_requests = max_requests
+        self.window_seconds = window_seconds
+        self._memory = RateLimiter(max_requests=max_requests, window_seconds=window_seconds)
+        self._redis: RedisRateLimiter | None = None
+
+    def _backend(self):
+        from app.core.config import get_settings
+        settings = get_settings()
+        if settings.RATE_LIMIT_BACKEND == "redis":
+            if self._redis is None:
+                self._redis = RedisRateLimiter(
+                    max_requests=self.max_requests, window_seconds=self.window_seconds, redis_url=settings.REDIS_URL,
+                )
+            return self._redis
+        return self._memory
+
+    async def __call__(self, request: Request) -> None:
+        await self._backend().check(f"{self.name}:{client_ip(request)}")
+
+    def reset(self) -> None:
+        self._memory._hits.clear()
+
+
+# Generous for real shoppers (a family placing a couple of orders), tight
+# enough that a bot can't hold the catalogue: 12 guest orders / 10 min / IP.
+public_order_limit = PublicRateLimit("public-order", max_requests=12, window_seconds=600)
+public_contact_limit = PublicRateLimit("public-contact", max_requests=6, window_seconds=600)
+public_payment_limit = PublicRateLimit("public-payment", max_requests=20, window_seconds=600)
+_PUBLIC_LIMITERS = (public_order_limit, public_contact_limit, public_payment_limit)
+
+
+def reset_public_limiters() -> None:
+    """Test isolation helper (mirrors `auth_rate_limiter._hits.clear()`)."""
+    for limiter in _PUBLIC_LIMITERS:
+        limiter.reset()

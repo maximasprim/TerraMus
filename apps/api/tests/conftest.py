@@ -82,8 +82,12 @@ async def client(engine):
     # getting 429'd by hit counts accumulated from unrelated earlier tests'
     # register()/login() calls - found by actually running the full suite
     # after adding the rate limiter, not just the isolated middleware tests.
-    from app.core.middleware import auth_rate_limiter
+    from app.core.middleware import auth_rate_limiter, reset_public_limiters
     auth_rate_limiter._hits.clear()
+    # Same reasoning for the public-write limiters (guest checkout / contact
+    # form / guest payment): without this, order POSTs from unrelated earlier
+    # tests would accumulate against the per-IP limit and 429 later tests.
+    reset_public_limiters()
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:

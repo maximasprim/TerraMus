@@ -13,7 +13,7 @@ import { QueryProvider } from "@/components/query-provider";
 
 export const metadata: Metadata = {
   title: "TerraMus - Farm Management Platform",
-  description: "Livestock farm management, ERP & e-commerce platform",
+  description: "Livestock farm management, ERP & E-commerce platform",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

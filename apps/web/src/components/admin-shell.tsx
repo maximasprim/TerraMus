@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { clsx } from "clsx";
-import { LayoutDashboard, Beef, Sprout, LogOut, MapPin, Users, ShoppingCart, Tag, Package, Wallet, Truck, UserCog, Wrench, Search, Settings, UsersRound, CalendarClock, Bell, Newspaper, CreditCard, ExternalLink } from "lucide-react";
+import { LayoutDashboard, Beef, Sprout, LogOut, MapPin, Users, ShoppingCart, Tag, Package, Wallet, Truck, UserCog, Wrench, Search, Settings, UsersRound, CalendarClock, Bell, Newspaper, CreditCard, ExternalLink, Inbox } from "lucide-react";
 import { useRequireAuth, useLogout } from "@/lib/use-auth";
 
 const NAV = [
@@ -21,6 +21,7 @@ const NAV = [
   { href: "/admin/assets", label: "Assets", icon: Wrench },
   { href: "/admin/customers", label: "Customers", icon: Users },
   { href: "/admin/orders", label: "Orders", icon: ShoppingCart },
+  { href: "/admin/inquiries", label: "Inquiries", icon: Inbox },
   { href: "/admin/cms", label: "Site Content", icon: Newspaper },
   { href: "/admin/notifications", label: "Notifications", icon: Bell },
   { href: "/admin/users", label: "Team", icon: UsersRound },
@@ -82,7 +83,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           Sign out
         </button>
       </aside>
-      <main className="flex-1 overflow-y-auto p-8">{children}</main>
+      <main className="flex-1 overflow-y-auto p-3">{children}</main>
     </div>
   );
 }
