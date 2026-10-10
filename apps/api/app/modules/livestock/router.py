@@ -52,7 +52,7 @@ async def list_animals(
         query = query.where(Animal.farm_id == farm_id)
     if active_only:
         query = query.where(Animal.status.notin_(INACTIVE_STATUSES))
-    query = query.order_by(Animal.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
+    query = query.order_by(Animal.created_at.desc(), Animal.id).offset((page - 1) * page_size).limit(page_size)
     result = await db.execute(query)
     return result.scalars().all()
 

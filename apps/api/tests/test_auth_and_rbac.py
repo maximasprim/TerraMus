@@ -302,3 +302,37 @@ async def test_list_roles(client):
     names = {r["name"] for r in resp.json()}
     assert "Farm Owner" in names
     assert "Veterinarian" in names
+
+
+async def test_audit_log_listing_names_the_actor_and_supports_filters_and_paging(client):
+    reg = await client.post("/api/v1/auth/register", json={
+        "organization_name": "Audit Page Farm", "full_name": "Wanjiku Owner",
+        "email": "auditpage@example.com", "password": "supersecret123",
+    })
+    headers = {"Authorization": f"Bearer {reg.json()['access_token']}"}
+    # The Free plan caps seats at 2; this test needs 3 users, so lift the cap.
+    from app.core import database as db_module
+    from app.modules.billing.service import ensure_default_tiers
+    async with db_module.AsyncSessionLocal() as session:
+        (await ensure_default_tiers(session))["free"].max_users = None
+        await session.commit()
+    users = (await client.get("/api/v1/users", headers=headers)).json()
+    owner_role_id = next(u for u in users if u["email"] == "auditpage@example.com")["roles"][0]["id"]
+    for n in (1, 2):
+        worker = await client.post("/api/v1/users", headers=headers, json={
+            "full_name": f"Worker {n}", "email": f"auditpageworker{n}@example.com", "password": "supersecret123",
+        })
+        await client.patch(f"/api/v1/users/{worker.json()['id']}/roles", headers=headers, json={"role_ids": [owner_role_id]})
+
+    everything = (await client.get("/api/v1/audit-logs", headers=headers)).json()
+    assert len(everything) == 2 and all(row["user_name"] == "Wanjiku Owner" for row in everything)   # actor resolved to a name
+
+    assert len((await client.get("/api/v1/audit-logs?entity_type=user", headers=headers)).json()) == 2
+    assert (await client.get("/api/v1/audit-logs?entity_type=crops", headers=headers)).json() == []
+    assert len((await client.get("/api/v1/audit-logs?action=user_roles_changed", headers=headers)).json()) == 2
+
+    first = (await client.get("/api/v1/audit-logs?limit=1", headers=headers)).json()
+    second = (await client.get("/api/v1/audit-logs?limit=1&offset=1", headers=headers)).json()
+    assert len(first) == len(second) == 1 and first[0]["id"] != second[0]["id"]
+    assert [first[0]["id"], second[0]["id"]] == [row["id"] for row in everything]                    # paging keeps the same order
+    assert (await client.get("/api/v1/audit-logs?limit=0", headers=headers)).status_code == 422

@@ -1,9 +1,11 @@
+import logging
 import re
 import uuid
 from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -63,46 +65,52 @@ def _dns_instructions_for(domain: str, token: str) -> "schemas.DnsInstructions":
 
 
 async def set_organization_domain(db: AsyncSession, org_id: uuid.UUID, domain: str) -> "schemas.DomainStatusOut":
-    """Registers `domain` against this org and against the Vercel project
-    (if VERCEL_API_TOKEN is configured), and issues a fresh ownership
-    verification token. Does NOT mark the domain verified — that only
-    happens in verify_organization_domain, once the TXT record is actually
-    found published. Overwrites any previous domain/token this org had,
-    resetting verified to False — switching domains means re-proving
-    ownership of the new one."""
+    """Records `domain` as this org's CLAIMED domain and issues a fresh
+    ownership-verification token. Nothing else happens yet: the domain is not
+    verified, not routed, and NOT registered with the Vercel project - that
+    only happens in verify_organization_domain, once the TXT record is
+    actually found published. Overwrites any previous domain/token this org
+    had, resetting verified to False - switching domains means re-proving
+    ownership of the new one.
+
+    Claims never block each other: several orgs can claim the same domain, and
+    only DNS proof decides who owns it (the DB allows one VERIFIED holder per
+    domain - migration 0026). Previously the first claimant locked everyone
+    else out without ever proving anything."""
     import secrets
     from app.core import vercel_client
+    from app.core.config import get_settings
+    from app.core.domain_validation import hosts_from_urls, normalise_domain
     from app.modules.identity import schemas as _schemas
 
-    domain = domain.strip().lower()
-    existing = await db.execute(
-        select(Organization).where(Organization.custom_domain == domain, Organization.id != org_id)
-    )
-    if existing.scalar_one_or_none():
-        raise HTTPException(status.HTTP_409_CONFLICT, "This domain is already in use by another organization")
+    s = get_settings()
+    domain = normalise_domain(domain, hosts_from_urls([s.PUBLIC_SITE_BASE_URL, *s.CORS_ORIGINS]))  # defensive; the schema already does this
 
     org = await get_organization(db, org_id)
+    if org.custom_domain == domain and org.domain_verified:
+        # Re-submitting an already-verified domain must not reset it and take the storefront offline.
+        return await get_organization_domain_status(db, org_id)
+
+    previous_domain, previous_was_verified = org.custom_domain, org.domain_verified
     org.custom_domain = domain
     org.domain_verification_token = secrets.token_urlsafe(24)
     org.domain_verified = False
     org.domain_added_at = datetime.now(timezone.utc)
-
-    vercel_status = None
-    try:
-        await vercel_client.add_domain_to_project(domain)
-        vercel_status = "added"
-    except vercel_client.VercelNotConfigured:
-        vercel_status = "vercel_not_configured"
-    except Exception as exc:  # noqa: BLE001 — surfaced to the caller, not swallowed
-        vercel_status = f"vercel_error: {exc}"
-
     await db.commit()
     await db.refresh(org)
+
+    # Only a VERIFIED holder ever had the old domain registered with Vercel (registration now happens
+    # after verification), so only then is there anything of ours to clean up.
+    if previous_domain and previous_domain != domain and previous_was_verified:
+        try:
+            await vercel_client.remove_domain_from_project(previous_domain)
+        except Exception:  # noqa: BLE001 - best effort; switching domains must not fail on a Vercel hiccup
+            pass
 
     return _schemas.DomainStatusOut(
         domain=org.custom_domain, verified=org.domain_verified,
         dns_instructions=_dns_instructions_for(org.custom_domain, org.domain_verification_token),
-        vercel_status=vercel_status,
+        vercel_status="pending_dns_verification",
     )
 
 
@@ -145,15 +153,46 @@ async def verify_organization_domain(db: AsyncSession, org_id: uuid.UUID) -> "sc
         except Exception:
             return False
 
-    verified = await asyncio.to_thread(_check_txt)
-    if verified:
+    vercel_status = None
+    if not org.domain_verified and await asyncio.to_thread(_check_txt):
+        # Publishing OUR org's unique token at this domain proves control of its DNS right now. If a different
+        # org still holds the domain "verified" (e.g. it lapsed and was bought by the new owner), that older proof
+        # is stale - release it, or the partial unique index would reject this verification.
+        stale = await db.execute(select(Organization).where(
+            Organization.custom_domain == org.custom_domain, Organization.id != org.id, Organization.domain_verified.is_(True),
+        ))
+        for other in stale.scalars().all():
+            logging.getLogger("app.identity.domain").warning(
+                "domain %s: releasing stale verified holder org=%s in favour of org=%s (DNS proof)", org.custom_domain, other.id, org.id,
+            )
+            other.custom_domain = None
+            other.domain_verification_token = None
+            other.domain_verified = False
+            other.domain_added_at = None
+        await db.flush()  # release before claiming, so the unique index never sees two verified holders
         org.domain_verified = True
-        await db.commit()
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+            raise HTTPException(status.HTTP_409_CONFLICT, "This domain was just verified by another organization - please try again")
         await db.refresh(org)
+
+        # Ownership is proven, so NOW register it with the Vercel project (this used to happen when the
+        # domain was merely typed in, before anything was proven).
+        from app.core import vercel_client
+        try:
+            await vercel_client.add_domain_to_project(org.custom_domain)
+            vercel_status = "added"
+        except vercel_client.VercelNotConfigured:
+            vercel_status = "vercel_not_configured"
+        except Exception as exc:  # noqa: BLE001 - surfaced to the caller, not swallowed
+            vercel_status = f"vercel_error: {exc}"
 
     return _schemas.DomainStatusOut(
         domain=org.custom_domain, verified=org.domain_verified,
         dns_instructions=None if org.domain_verified else _dns_instructions_for(org.custom_domain, org.domain_verification_token),
+        vercel_status=vercel_status,
     )
 
 
@@ -161,7 +200,9 @@ async def remove_organization_domain(db: AsyncSession, org_id: uuid.UUID) -> Non
     from app.core import vercel_client
 
     org = await get_organization(db, org_id)
-    if org.custom_domain:
+    # Only a VERIFIED holder has this domain registered with Vercel. An org that merely claimed it must not be
+    # able to remove it from the project - that would take down another tenant's live domain.
+    if org.custom_domain and org.domain_verified:
         try:
             await vercel_client.remove_domain_from_project(org.custom_domain)
         except vercel_client.VercelNotConfigured:

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import String, Boolean, ForeignKey, Table, Column, DateTime, Numeric
+from sqlalchemy import String, Boolean, ForeignKey, Table, Column, DateTime, Numeric, Index, text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -10,6 +10,10 @@ from app.core.database import Base, UUIDPKMixin, TimestampMixin
 
 class Organization(Base, UUIDPKMixin, TimestampMixin):
     __tablename__ = "organizations"
+    # Many orgs may CLAIM a domain; only one may hold it VERIFIED (migration 0026).
+    __table_args__ = (
+        Index("uq_organizations_verified_custom_domain", "custom_domain", unique=True, postgresql_where=text("domain_verified")),
+    )
 
     name: Mapped[str] = mapped_column(String(255))
     slug: Mapped[str] = mapped_column(String(255), unique=True, index=True)
@@ -28,7 +32,7 @@ class Organization(Base, UUIDPKMixin, TimestampMixin):
     # routing traffic there (see core/vercel_client.py's module docstring
     # for why that's not the same thing). Nothing reads custom_domain as
     # "live" for routing purposes unless domain_verified is also True.
-    custom_domain: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    custom_domain: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     domain_verification_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
     domain_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     domain_added_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

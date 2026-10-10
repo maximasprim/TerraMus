@@ -8,3 +8,15 @@ api_image   = "111111111111.dkr.ecr.af-south-1.amazonaws.com/farmplatform-api:CH
 domain_name = "" # e.g. "api.example-farm.co.ke" - leave blank for HTTP-only via the raw ALB DNS name
 db_password = "CHANGEME"
 jwt_secret  = "CHANGEME"
+
+# --- Optional: settings the API needs in a real deployment ---------------------------------------------
+# cors_origins         = ["https://app.example-farm.co.ke"]   # without this, a deployed web app cannot call the API
+# public_site_base_url = "https://app.example-farm.co.ke"
+# extra_environment = {
+#   STORAGE_BACKEND         = "supabase"
+#   SUPABASE_URL            = "https://<project-ref>.supabase.co"
+#   SUPABASE_STORAGE_BUCKET = "listing-images"
+# }
+# extra_secrets = {                       # stored in AWS Secrets Manager, not in the task definition
+#   SUPABASE_SECRET_KEY = "sb_secret_CHANGEME"
+# }

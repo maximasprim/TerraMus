@@ -63,3 +63,32 @@ Startup logs a warning if a production-like `ENV` still uses a placeholder `JWT_
 **Behaviour change to be aware of:** any deployment whose `ENV` is not
 `development|dev|local|test|testing` no longer accepts the mock payment provider unless you
 opt in as described above.
+
+## Later additions (same phase)
+
+### New settings
+| Setting | Default | Purpose |
+|---|---|---|
+| `STORAGE_BACKEND`, `SUPABASE_URL`, `SUPABASE_SECRET_KEY` (or legacy `SUPABASE_SERVICE_ROLE_KEY`), `SUPABASE_STORAGE_BUCKET` | `database` | listing photo storage |
+| `TRUSTED_PROXY_COUNT` | `0` | proxies in front of the API (1 behind an ALB) |
+| `ALLOW_MOCK_PAYMENTS` | unset | mock provider: on in dev/test ENV, off elsewhere unless `true` + strong secret |
+| `GUEST_ORDER_TTL_MINUTES` / `PAYMENT_PENDING_TTL_HOURS` | `120` / `24` | abandoned guest order expiry (`0` disables) |
+| `DARAJA_*` (all six, incl. `DARAJA_CALLBACK_SHARED_SECRET`) | unset | M-Pesa; the storefront only offers it when all are present |
+
+### Behaviour worth knowing
+- **Custom domains:** typing a domain only *claims* it. It is routed (and registered with Vercel)
+  after the DNS TXT record is verified. Verifying a domain that another organization still holds
+  verified releases that older holder - publishing your token in DNS is the proof.
+- **Plan caps:** `max_crop_plantings` mirrors each tier's animal cap on existing databases
+  (migration 0027); edit the `subscription_tiers` rows to tune. Only creation is blocked.
+- **Billing** mutations and payment history need `users.manage`; reading the current plan does not.
+- **Permissions in the UI** are a usability layer. Add a section to `lib/permissions.ts` when you add
+  an admin page; the contract audit fails if a code there does not exist on the backend.
+- **Payments:** an unpaid order stays `payment_pending` after a cancelled M-Pesa prompt and can be
+  retried. Settlement is only ever confirmed by the provider callback, never by the browser.
+
+### Terraform
+New optional variables: `cors_origins`, `public_site_base_url`, `extra_environment`, `extra_secrets`.
+`DATABASE_URL`, `JWT_SECRET` and everything in `extra_secrets` now live in one Secrets Manager
+secret and reach the container through ECS `secrets`; a rotated value reaches running tasks on the
+next deployment. These files have not been run through `terraform plan`.

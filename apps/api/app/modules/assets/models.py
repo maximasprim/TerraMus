@@ -30,7 +30,7 @@ class Asset(Base, UUIDPKMixin, TimestampMixin):
     name: Mapped[str] = mapped_column(String(255))
     asset_type: Mapped[str] = mapped_column(String(32), index=True)
     serial_number: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    status: Mapped[str] = mapped_column(String(16), default="in_use", index=True)
+    status: Mapped[str] = mapped_column(String(32), default="in_use", index=True)
     condition: Mapped[str] = mapped_column(String(16), default="good")
 
     acquisition_date: Mapped[date | None] = mapped_column(Date, nullable=True)

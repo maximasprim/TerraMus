@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, clearTokens, getAccessToken, setTokens } from "@/lib/api";
+import { hasPermission } from "@/lib/permissions";
 import type { MeResponse, TokenPair } from "@/lib/types";
 
 export function useMe() {
@@ -13,6 +14,14 @@ export function useMe() {
     enabled: typeof window !== "undefined" && !!getAccessToken(),
     retry: false,
   });
+}
+
+/** `can("livestock.update")` - whether the signed-in user holds a backend permission, for showing or
+ * hiding action buttons. Reads the cached /auth/me (no extra request). A usability layer only: the
+ * backend re-checks every request. Allows everything until permissions have loaded (fail open). */
+export function useCan() {
+  const permissions = useMe().data?.permissions;
+  return useCallback((code: string) => hasPermission(permissions, code), [permissions]);
 }
 
 /** Redirects to /login if there's no valid session. Use at the top of any

@@ -2,10 +2,20 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Georgia (the display fallback) draws OLD-STYLE numerals, so a 0 looks like a small "o"
+   ("KES o" on the dashboard cards). This face covers ONLY the digits 0-9 and borrows the lining
+   figures of Palatino (present on Windows, macOS and most Linux), so numbers read as numbers while
+   every letter stays Georgia. If none of these fonts exist the face is simply skipped. */
+@font-face {
+  font-family: "TerraDigits";
+  src: local("Palatino Linotype"), local("Palatino"), local("Book Antiqua"), local("URW Palladio L"), local("P052");
+  unicode-range: U+0030-0039;
+}
+
 :root {
   /* See app/layout.tsx for why these are system-font fallbacks rather than
      next/font/google calls in this environment. */
-  --font-fraunces: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+  --font-fraunces: "TerraDigits", Georgia, "Iowan Old Style", "Palatino Linotype", serif;
   --font-plex-sans: -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-plex-mono: "SF Mono", Consolas, "Liberation Mono", monospace;
 }

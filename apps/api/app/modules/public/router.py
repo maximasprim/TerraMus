@@ -25,6 +25,22 @@ router = APIRouter(prefix="/api/v1/public/{org_slug}", tags=["public"])
 domain_router = APIRouter(prefix="/api/v1/public", tags=["public"])
 
 
+@domain_router.get("/payment-methods", response_model=schemas.PaymentMethodsOut)
+async def payment_methods():
+    """Online payment methods this deployment can really offer shoppers (only those fully
+    configured). The storefront shows a pay button per entry; an empty list means orders
+    are settled offline with the farm."""
+    from app.core.config import get_settings
+    from app.modules.payments.availability import available_methods
+
+    s = get_settings()
+    return schemas.PaymentMethodsOut(methods=available_methods({
+        "consumer_key": s.DARAJA_CONSUMER_KEY, "consumer_secret": s.DARAJA_CONSUMER_SECRET,
+        "shortcode": s.DARAJA_SHORTCODE, "passkey": s.DARAJA_PASSKEY,
+        "callback_url": s.DARAJA_CALLBACK_URL, "callback_shared_secret": s.DARAJA_CALLBACK_SHARED_SECRET,
+    }))
+
+
 @domain_router.get("/resolve-domain", response_model=schemas.ResolveDomainOut | None)
 async def resolve_domain(host: str = Query(...), db: AsyncSession = Depends(get_db)):
     """Returns the org slug for a VERIFIED custom domain, or null if the

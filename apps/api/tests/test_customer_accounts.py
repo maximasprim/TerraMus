@@ -168,7 +168,7 @@ async def test_order_detail_surfaces_invoice_and_payments(client):
     from app.core.config import get_settings
     settings = get_settings()
 
-    payment = await client.post(f"/api/v1/public/{org_slug}/orders/{order_id}/pay", json={
+    payment = await client.post(f"/api/v1/public/{org_slug}/orders/{order_id}/pay/mock", json={
         "phone_or_token": "254700000000", "email": "grace@acc7.example.com",
     })
     ref = payment.json()["provider_reference"]

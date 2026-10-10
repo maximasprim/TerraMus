@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AdminShell } from "@/components/admin-shell";
+import { Can } from "@/components/can";
 import { Card, Button, Input, Select, Modal, ErrorState, EmptyState } from "@/components/ui";
 import { BulkImportModal } from "@/components/bulk-import-modal";
 import { apiFetch, ApiError } from "@/lib/api";
@@ -46,7 +47,7 @@ export default function InventoryPage() {
             <Button variant="ghost">Valuation report</Button>
           </Link>
           <Button variant="ghost" onClick={() => setImportOpen(true)}>Import CSV</Button>
-          <Button onClick={() => { setError(null); setModalOpen(true); }}>+ New item</Button>
+          <Can permission="inventory.adjust"><Button onClick={() => { setError(null); setModalOpen(true); }}>+ New item</Button></Can>
         </div>
       </div>
 

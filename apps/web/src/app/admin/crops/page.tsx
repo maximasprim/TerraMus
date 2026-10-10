@@ -4,15 +4,20 @@ import Link from "next/link";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AdminShell } from "@/components/admin-shell";
+import { Can } from "@/components/can";
 import { TagChip, StatusBadge, ErrorState, EmptyState, Button, Modal, Select } from "@/components/ui";
-import { apiFetch, apiUpload, ApiError } from "@/lib/api";
+import { ApiError, apiFetch, apiFetchAll, apiUpload } from "@/lib/api";
+import { useCatalog } from "@/lib/use-catalog";
+import { ModuleDisabledNotice } from "@/components/module-disabled-notice";
 import type { CropPlanting, Farm, BulkImportResult } from "@/lib/types";
 
 export default function CropsListPage() {
   const [importOpen, setImportOpen] = useState(false);
+  const { data: catalog } = useCatalog();
+  const moduleOff = catalog?.crops_enabled === false;
   const { data, isLoading, error } = useQuery<CropPlanting[]>({
     queryKey: ["crops"],
-    queryFn: () => apiFetch<CropPlanting[]>("/api/v1/crops?page_size=100"),
+    queryFn: () => apiFetchAll<CropPlanting>("/api/v1/crops"),
   });
 
   return (
@@ -23,12 +28,13 @@ export default function CropsListPage() {
           <p className="text-sm text-muted">Every plot/batch of a crop currently on record.</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="ghost" onClick={() => setImportOpen(true)}>Import CSV</Button>
-          <Link href="/admin/crops/new">
+          {!moduleOff && <Can permission="crops.create"><Button variant="ghost" onClick={() => setImportOpen(true)}>Import CSV</Button></Can>}
+          {!moduleOff && <Can permission="crops.create"><Link href="/admin/crops/new">
             <Button>+ Register planting</Button>
-          </Link>
+          </Link></Can>}
         </div>
       </div>
+      {moduleOff && <ModuleDisabledNotice module="Crops" />}
 
       {error && <ErrorState message={error instanceof ApiError ? error.message : "Failed to load crops"} />}
       {isLoading && <p className="text-sm text-muted">Loading…</p>}

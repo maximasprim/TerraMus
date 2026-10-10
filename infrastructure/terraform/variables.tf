@@ -103,3 +103,28 @@ variable "domain_name" {
   type        = string
   default     = ""
 }
+
+variable "cors_origins" {
+  description = "Browser origins allowed to call the API, e.g. [\"https://app.example-farm.co.ke\"]. Leave empty to keep the API default (localhost only) - set this for any real deployment."
+  type        = list(string)
+  default     = []
+}
+
+variable "public_site_base_url" {
+  description = "Public address of the web app (used for QR-code links etc.), e.g. https://app.example-farm.co.ke. Leave blank to keep the API default (http://localhost:3000)."
+  type        = string
+  default     = ""
+}
+
+variable "extra_environment" {
+  description = "Additional NON-secret API settings as NAME = value, e.g. { STORAGE_BACKEND = \"supabase\", SUPABASE_URL = \"https://<ref>.supabase.co\", SUPABASE_STORAGE_BUCKET = \"listing-images\" }."
+  type        = map(string)
+  default     = {}
+}
+
+variable "extra_secrets" {
+  description = "Additional SECRET API settings as NAME = value, stored in Secrets Manager (never in the task definition), e.g. { SUPABASE_SECRET_KEY = \"sb_secret_...\", STRIPE_SECRET_KEY = \"...\", MOCK_PAYMENT_SECRET = \"...\" }. Same never-commit rule as db_password."
+  type        = map(string)
+  default     = {}
+  sensitive   = true
+}

@@ -10,6 +10,7 @@ export interface SubscriptionTierOut {
   monthly_price_kes: number;
   max_users: number | null;
   max_animals: number | null;
+  max_crop_plantings?: number | null;
 }
 
 export interface SubscriptionOut {

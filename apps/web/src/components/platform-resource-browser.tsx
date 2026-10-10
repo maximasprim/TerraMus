@@ -9,6 +9,7 @@ import type { ModuleConfig, ModuleField } from "@/lib/platform-modules";
 function formatCell(value: unknown, format?: string): React.ReactNode {
   if (value === null || value === undefined || value === "") return <span className="text-muted">-</span>;
   if (format === "badge") return <StatusBadge status={String(value)} />;
+  if (format === "shortid") return <span className="font-mono text-xs">{String(value).slice(0, 8).toUpperCase()}</span>;
   if (format === "date") return new Date(String(value)).toLocaleDateString();
   if (format === "currency") return `KES ${Number(value).toLocaleString()}`;
   if (typeof value === "boolean") return value ? "Yes" : "No";
@@ -47,7 +48,7 @@ export function PlatformResourceBrowser({ orgId, config, canWrite }: { orgId: st
   const changeStatus = useMutation({
     mutationFn: ({ id, value }: { id: string; value: string }) =>
       platformApiFetch(config.statusAction!.path(orgId, id), {
-        method: "PATCH", body: JSON.stringify({ [config.statusAction!.field]: value }),
+        method: config.statusAction!.method ?? "PATCH", body: JSON.stringify({ [config.statusAction!.field]: value }),
       }),
     onSuccess: () => { invalidate(); setStatusRow(null); setFormError(null); },
     onError: (err) => setFormError(err instanceof PlatformApiError ? err.message : "Failed to change status"),
@@ -139,7 +140,7 @@ export function PlatformResourceBrowser({ orgId, config, canWrite }: { orgId: st
         <Modal open={!!editingRow} onClose={() => setEditingRow(null)} title={`Edit ${config.label.slice(0, -1) || config.label}`}>
           {editingRow && (
             <GenericForm
-              orgId={orgId} fields={[...config.fields, ...(config.editExtraFields ?? [])]} error={formError} pending={update.isPending} initial={editingRow}
+              orgId={orgId} fields={[...config.fields.filter((f) => !f.createOnly), ...(config.editExtraFields ?? [])]} error={formError} pending={update.isPending} initial={editingRow}
               onSubmit={(body) => update.mutate({ id: String(editingRow.id), body })}
             />
           )}

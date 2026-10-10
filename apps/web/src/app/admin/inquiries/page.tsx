@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AdminShell } from "@/components/admin-shell";
 import { Button, Card, EmptyState, ErrorState, TagChip } from "@/components/ui";
-import { apiFetch, ApiError } from "@/lib/api";
+import { ApiError, apiFetch, apiFetchAll } from "@/lib/api";
 import { whatsappLink } from "@/lib/shop-utils";
 import type { Inquiry, InquirySummary } from "@/lib/types";
 
@@ -27,7 +27,7 @@ export default function InquiriesPage() {
   });
   const list = useQuery<Inquiry[]>({
     queryKey: ["inquiries", filter],
-    queryFn: () => apiFetch<Inquiry[]>(`/api/v1/inquiries${filter === "all" ? "" : `?status=${filter}`}`),
+    queryFn: () => apiFetchAll<Inquiry>(`/api/v1/inquiries${filter === "all" ? "" : `?status=${filter}`}`, { style: "offset", pageSize: 100 }),
   });
 
   const setStatus = useMutation({

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AdminShell } from "@/components/admin-shell";
+import { Can } from "@/components/can";
 import { Card, StatusBadge, ErrorState, Button, Input } from "@/components/ui";
 import { apiFetch, apiDownload, ApiError } from "@/lib/api";
 import type { Order, Customer, Animal, Invoice } from "@/lib/types";
@@ -159,9 +160,12 @@ export default function OrderDetailPage() {
   );
 }
 
+// The mock provider only exists in development: in production the API refuses it (404), so don't offer it.
+const IS_PRODUCTION_BUILD = process.env.NODE_ENV === "production";
+
 function RecordPaymentSection({ orderId }: { orderId: string }) {
   const queryClient = useQueryClient();
-  const [provider, setProvider] = useState<"mock" | "mpesa" | "stripe">("mock");
+  const [provider, setProvider] = useState<"mock" | "mpesa" | "stripe">(IS_PRODUCTION_BUILD ? "mpesa" : "mock");
   const [phoneOrToken, setPhoneOrToken] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -178,6 +182,7 @@ function RecordPaymentSection({ orderId }: { orderId: string }) {
   });
 
   return (
+    <Can permission="payments.manage">
     <Card className="mt-4">
       <h2 className="mb-3 font-display text-lg text-forest">Record payment</h2>
       <p className="mb-3 text-xs text-muted">
@@ -202,7 +207,7 @@ function RecordPaymentSection({ orderId }: { orderId: string }) {
             onChange={(e) => setProvider(e.target.value as typeof provider)}
             className="w-full rounded-md border border-hairline bg-white px-3 py-2 text-sm"
           >
-            <option value="mock">Mock (testing)</option>
+            {!IS_PRODUCTION_BUILD && <option value="mock">Mock (testing)</option>}
             <option value="mpesa">M-Pesa</option>
             <option value="stripe">Stripe</option>
           </select>
@@ -218,6 +223,7 @@ function RecordPaymentSection({ orderId }: { orderId: string }) {
         </Button>
       </form>
     </Card>
+    </Can>
   );
 }
 

@@ -49,6 +49,44 @@ resource "aws_iam_role_policy" "ecs_task_s3" {
   })
 }
 
+# Secrets live in AWS Secrets Manager and are injected by ECS at container start
+# (the `secrets` block below). They used to be plain `environment` values, which
+# anyone able to view the task definition (console / `describe-task-definition`)
+# could read - including the database password inside DATABASE_URL.
+# NOTE: a rotated secret value only reaches running tasks on the next deployment.
+locals {
+  app_secrets = merge(
+    {
+      JWT_SECRET   = var.jwt_secret
+      DATABASE_URL = "postgresql+psycopg://${var.db_username}:${var.db_password}@${aws_db_instance.main.address}:5432/${var.db_name}"
+    },
+    var.extra_secrets,
+  )
+}
+
+resource "aws_secretsmanager_secret" "app" {
+  name                    = "${var.project_name}-${var.environment}-api-secrets"
+  recovery_window_in_days = 7
+}
+
+resource "aws_secretsmanager_secret_version" "app" {
+  secret_id     = aws_secretsmanager_secret.app.id
+  secret_string = jsonencode(local.app_secrets)
+}
+
+resource "aws_iam_role_policy" "ecs_execution_secrets" {
+  name = "${var.project_name}-${var.environment}-read-api-secrets"
+  role = aws_iam_role.ecs_execution.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["secretsmanager:GetSecretValue"]
+      Resource = [aws_secretsmanager_secret.app.arn]
+    }]
+  })
+}
+
 resource "aws_ecs_task_definition" "api" {
   family                   = "${var.project_name}-${var.environment}-api"
   requires_compatibilities = ["FARGATE"]
@@ -62,16 +100,27 @@ resource "aws_ecs_task_definition" "api" {
     name         = "api"
     image        = var.api_image
     portMappings = [{ containerPort = 8000, protocol = "tcp" }]
-    environment = [
-      { name = "ENV", value = var.environment },
-      { name = "DATABASE_URL", value = "postgresql+psycopg://${var.db_username}:${var.db_password}@${aws_db_instance.main.address}:5432/${var.db_name}" },
-      { name = "REDIS_URL", value = "redis://${aws_elasticache_cluster.main.cache_nodes[0].address}:6379/0" },
-      { name = "JWT_SECRET", value = var.jwt_secret },
-      { name = "RATE_LIMIT_BACKEND", value = "redis" },
-      { name = "TRUSTED_PROXY_COUNT", value = "1" },     # one ALB in front - lets per-IP rate limits see real visitors
-      { name = "ALLOW_MOCK_PAYMENTS", value = "false" }, # mock provider must never be live in AWS
-      { name = "S3_BUCKET", value = aws_s3_bucket.documents.bucket },
-      { name = "AWS_REGION", value = var.aws_region },
+    environment = concat(
+      [
+        { name = "ENV", value = var.environment },
+        { name = "REDIS_URL", value = "redis://${aws_elasticache_cluster.main.cache_nodes[0].address}:6379/0" },
+        { name = "RATE_LIMIT_BACKEND", value = "redis" },
+        { name = "TRUSTED_PROXY_COUNT", value = "1" },     # one ALB in front - lets per-IP rate limits see real visitors
+        { name = "ALLOW_MOCK_PAYMENTS", value = "false" }, # mock provider must never be live in AWS
+        { name = "S3_BUCKET", value = aws_s3_bucket.documents.bucket },
+        { name = "AWS_REGION", value = var.aws_region },
+      ],
+      # Only emitted when set, so an existing `terraform plan` is unchanged until you opt in. Without
+      # CORS_ORIGINS the API only allows http://localhost:3000, i.e. a deployed web app can't call it.
+      length(var.cors_origins) > 0 ? [{ name = "CORS_ORIGINS", value = jsonencode(var.cors_origins) }] : [],
+      var.public_site_base_url != "" ? [{ name = "PUBLIC_SITE_BASE_URL", value = var.public_site_base_url }] : [],
+      [for name, value in var.extra_environment : { name = name, value = value }],
+    )
+    secrets = [
+      for name in nonsensitive(keys(local.app_secrets)) : {
+        name      = name
+        valueFrom = "${aws_secretsmanager_secret.app.arn}:${name}::"
+      }
     ]
     logConfiguration = {
       logDriver = "awslogs"

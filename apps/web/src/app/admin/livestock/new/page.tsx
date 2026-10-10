@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { AdminShell } from "@/components/admin-shell";
-import { Card, Button, Input, Select, ErrorState } from "@/components/ui";
+import { Card, Button, Input, Select, ErrorState, EmptyState } from "@/components/ui";
 import { apiFetch, ApiError } from "@/lib/api";
 import type { Farm, Animal, EffectiveCatalog } from "@/lib/types";
 
@@ -38,6 +38,16 @@ export default function NewAnimalPage() {
   });
   const [error, setError] = useState<string | null>(null);
 
+  // The form used to start on "cattle" unconditionally. For an organization restricted to,
+  // say, poultry that value isn't in the dropdown yet would still be submitted (and rejected
+  // with a 403). Once the catalog loads, fall back to the first species they may actually use.
+  useEffect(() => {
+    if (!catalog || catalog.species.length === 0) return;
+    if (!catalog.species.some((s) => s.code === form.species)) {
+      setForm((f) => ({ ...f, species: catalog.species[0].code }));
+    }
+  }, [catalog, form.species]);
+
   const selectedFarm = farms?.find((f) => f.id === form.farm_id);
   const allLocations = selectedFarm?.branches.flatMap((b) => b.locations) ?? [];
 
@@ -61,6 +71,17 @@ export default function NewAnimalPage() {
     onSuccess: (animal) => router.push(`/admin/livestock/${animal.id}`),
     onError: (err) => setError(err instanceof ApiError ? err.message : "Failed to register animal"),
   });
+
+  if (catalog && !catalog.livestock_enabled) {
+    return (
+      <AdminShell>
+        <EmptyState
+          title="Livestock isn't enabled for this organization"
+          body="Ask your platform administrator to enable the livestock module for your account."
+        />
+      </AdminShell>
+    );
+  }
 
   return (
     <AdminShell>
@@ -135,6 +156,11 @@ export default function NewAnimalPage() {
               onChange={(e) => setForm({ ...form, breed: e.target.value })}
             />
           </div>
+          {catalog && catalog.species.length === 0 && (
+            <p className="text-sm text-clay">
+              No species are enabled for your organization yet. Ask your platform administrator to enable at least one.
+            </p>
+          )}
 
           <Select id="sex" label="Sex" value={form.sex} onChange={(e) => setForm({ ...form, sex: e.target.value })}>
             <option value="female">Female</option>

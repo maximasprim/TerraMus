@@ -39,6 +39,7 @@ export interface SubscriptionTierOut {
   monthly_price_kes: number;
   max_users: number | null;
   max_animals: number | null;
+  max_crop_plantings?: number | null;
 }
 
 export interface SubscriptionOut {
@@ -59,4 +60,24 @@ export interface SubscriptionPaymentOut {
   provider_reference: string;
   initiated_at: string;
   completed_at: string | null;
+}
+
+/** Raw per-organization catalog restrictions set by a platform admin.
+ *  `null` for a list means unrestricted; `[]` means nothing is allowed. */
+export interface TenantCatalogSettings {
+  organization_id: string;
+  livestock_enabled: boolean;
+  crops_enabled: boolean;
+  enabled_species: string[] | null;
+  enabled_crop_types: string[] | null;
+}
+
+/** PATCH body - omitted fields are left unchanged by the API. */
+export interface TenantCatalogSettingsUpdate {
+  livestock_enabled?: boolean;
+  crops_enabled?: boolean;
+  enabled_species?: string[];
+  enabled_crop_types?: string[];
+  clear_species_restriction?: boolean;
+  clear_crop_type_restriction?: boolean;
 }

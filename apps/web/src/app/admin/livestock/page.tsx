@@ -4,15 +4,28 @@ import Link from "next/link";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AdminShell } from "@/components/admin-shell";
+import { Can } from "@/components/can";
 import { TagChip, StatusBadge, ErrorState, EmptyState, Button, Modal, Select } from "@/components/ui";
-import { apiFetch, apiUpload, ApiError } from "@/lib/api";
+import { ApiError, apiDownload, apiFetch, apiFetchAll, apiUpload } from "@/lib/api";
+import { useCan } from "@/lib/use-auth";
+import { useCatalog } from "@/lib/use-catalog";
+import { ModuleDisabledNotice } from "@/components/module-disabled-notice";
 import type { Animal, Farm, BulkImportResult } from "@/lib/types";
 
 export default function LivestockListPage() {
   const [importOpen, setImportOpen] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const can = useCan();
+  const { data: catalog } = useCatalog();
+  const moduleOff = catalog?.livestock_enabled === false;
+  // literal URLs (not built from a variable) so the contract audit can verify them against the backend
+  const reportExport = (download: Promise<void>) =>
+    download.then(() => setExportError(null)).catch((err) => setExportError(err instanceof ApiError ? err.message : "Export failed"));
+  const exportCsv = () => reportExport(apiDownload("/api/v1/reports/export/livestock.csv", "livestock.csv"));
+  const exportPdf = () => reportExport(apiDownload("/api/v1/reports/export/livestock.pdf", "livestock.pdf"));
   const { data, isLoading, error } = useQuery<Animal[]>({
     queryKey: ["livestock"],
-    queryFn: () => apiFetch<Animal[]>("/api/v1/livestock?page_size=100"),
+    queryFn: () => apiFetchAll<Animal>("/api/v1/livestock"),
   });
 
   return (
@@ -23,12 +36,20 @@ export default function LivestockListPage() {
           <p className="text-sm text-muted">Every animal currently on record.</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="ghost" onClick={() => setImportOpen(true)}>Import CSV</Button>
-          <Link href="/admin/livestock/new">
+          {can("reports.view") && (
+            <>
+              <Button variant="ghost" onClick={exportCsv}>Export CSV</Button>
+              <Button variant="ghost" onClick={exportPdf}>Export PDF</Button>
+            </>
+          )}
+          {!moduleOff && <Can permission="livestock.create"><Button variant="ghost" onClick={() => setImportOpen(true)}>Import CSV</Button></Can>}
+          {!moduleOff && <Can permission="livestock.create"><Link href="/admin/livestock/new">
             <Button>+ Register animal</Button>
-          </Link>
+          </Link></Can>}
         </div>
       </div>
+      {moduleOff && <ModuleDisabledNotice module="Livestock" />}
+      {exportError && <div className="mb-4"><ErrorState message={exportError} /></div>}
 
       {error && <ErrorState message={error instanceof ApiError ? error.message : "Failed to load livestock"} />}
       {isLoading && <p className="text-sm text-muted">Loading…</p>}

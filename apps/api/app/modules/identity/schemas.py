@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, EmailStr, ConfigDict, Field
+from pydantic import BaseModel, EmailStr, ConfigDict, Field, field_validator
 
 
 class OrganizationOut(BaseModel):
@@ -98,6 +98,7 @@ class UpdateUserRolesRequest(BaseModel):
 
 
 class AuditLogOut(BaseModel):
+    user_name: str | None = None  # resolved actor name (None for system / platform-support actions)
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
     user_id: uuid.UUID | None
@@ -120,6 +121,15 @@ class PasswordResetConfirm(BaseModel):
 
 class DomainSetRequest(BaseModel):
     domain: str = Field(min_length=3, max_length=255, description="e.g. farm.example.com")
+
+    @field_validator("domain")
+    @classmethod
+    def _must_be_a_real_hostname(cls, value: str) -> str:
+        from app.core.config import get_settings
+        from app.core.domain_validation import hosts_from_urls, normalise_domain
+
+        s = get_settings()
+        return normalise_domain(value, hosts_from_urls([s.PUBLIC_SITE_BASE_URL, *s.CORS_ORIGINS]))
 
 
 class DnsInstructions(BaseModel):

@@ -8,6 +8,7 @@ from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.phone import normalise_ke_msisdn
 from app.modules.billing.models import (
     SubscriptionTier, Subscription, SubscriptionPayment, SubscriptionPaymentWebhookEvent,
 )
@@ -18,22 +19,22 @@ from app.modules.payments.providers import get_provider
 # reasoning as identity.service.ensure_permission_catalog for the permission
 # catalog. slug is the stable identifier; name/price can change over time.
 DEFAULT_TIERS = [
-    # (slug, name, monthly_price_kes, max_users, max_animals)
-    ("free", "Free", 0, 2, 25),
-    ("basic", "Basic", 1500, 5, 150),
-    ("pro", "Pro", 4500, 20, 1000),
-    ("enterprise", "Enterprise", 15000, None, None),
+    # (slug, name, monthly_price_kes, max_users, max_animals, max_crop_plantings)
+    ("free", "Free", 0, 2, 25, 25),
+    ("basic", "Basic", 1500, 5, 150, 150),
+    ("pro", "Pro", 4500, 20, 1000, 1000),
+    ("enterprise", "Enterprise", 15000, None, None, None),
 ]
 
 
 async def ensure_default_tiers(db: AsyncSession) -> dict[str, SubscriptionTier]:
     result = await db.execute(select(SubscriptionTier))
     existing = {t.slug: t for t in result.scalars().all()}
-    for slug, name, price, max_users, max_animals in DEFAULT_TIERS:
+    for slug, name, price, max_users, max_animals, max_crop_plantings in DEFAULT_TIERS:
         if slug not in existing:
             tier = SubscriptionTier(
                 slug=slug, name=name, monthly_price_kes=price,
-                max_users=max_users, max_animals=max_animals,
+                max_users=max_users, max_animals=max_animals, max_crop_plantings=max_crop_plantings,
             )
             db.add(tier)
             existing[slug] = tier
@@ -42,6 +43,10 @@ async def ensure_default_tiers(db: AsyncSession) -> dict[str, SubscriptionTier]:
 
 
 async def list_tiers(db: AsyncSession) -> list[SubscriptionTier]:
+    # Tiers are seeded lazily (see ensure_default_tiers); without this a fresh
+    # deployment returned an empty plan list until some org opened billing.
+    await ensure_default_tiers(db)
+    await db.commit()
     result = await db.execute(
         select(SubscriptionTier).where(SubscriptionTier.is_active.is_(True)).order_by(SubscriptionTier.monthly_price_kes)
     )
@@ -85,6 +90,11 @@ async def initiate_subscription_payment(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "The free tier does not require payment")
 
     await check_tier_covers_current_usage(db, org_id, tier)
+
+    try:
+        phone_number = normalise_ke_msisdn(phone_number)  # accept 0712 345 678 as well as 254712345678
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
 
     subscription = await get_or_create_subscription(db, org_id)
 
@@ -281,6 +291,32 @@ async def check_animal_limit(db: AsyncSession, org_id: uuid.UUID) -> None:
         )
 
 
+async def check_crop_planting_limit(db: AsyncSession, org_id: uuid.UUID) -> None:
+    """Raises 402 if the org's tier caps max_crop_plantings and it's already at
+    the cap. Counts live plantings only (harvested / failed / archived ones don't
+    use up capacity - mirrors how inactive animals are treated). Called from
+    crops.service.create_planting."""
+    from app.modules.crops.models import CropPlanting, INACTIVE_PLANTING_STATUSES
+
+    subscription = await get_or_create_subscription(db, org_id)
+    tier_result = await db.execute(select(SubscriptionTier).where(SubscriptionTier.id == subscription.tier_id))
+    tier = tier_result.scalar_one()
+    if tier.max_crop_plantings is None:
+        return  # unlimited on this tier
+
+    current_count = (await db.execute(
+        select(func.count(CropPlanting.id)).where(
+            CropPlanting.organization_id == org_id, CropPlanting.status.notin_(INACTIVE_PLANTING_STATUSES),
+        )
+    )).scalar_one()
+    if current_count >= tier.max_crop_plantings:
+        raise HTTPException(
+            status.HTTP_402_PAYMENT_REQUIRED,
+            f"Your '{tier.name}' plan allows up to {tier.max_crop_plantings} active crop plantings. "
+            f"Upgrade your subscription to add more.",
+        )
+
+
 async def check_user_limit(db: AsyncSession, org_id: uuid.UUID) -> None:
     """Raises 402 if the org's subscription tier caps max_users and it's
     already at/over that cap. Called from identity's POST /api/v1/users
@@ -340,6 +376,22 @@ async def check_tier_covers_current_usage(db: AsyncSession, org_id: uuid.UUID, t
                 f"You currently have {animal_count} animals, which is more than the "
                 f"'{target_tier.name}' plan's limit of {target_tier.max_animals}. "
                 f"Archive animals before downgrading.",
+            )
+
+    if target_tier.max_crop_plantings is not None:
+        from app.modules.crops.models import CropPlanting, INACTIVE_PLANTING_STATUSES
+
+        planting_count = (await db.execute(
+            select(func.count(CropPlanting.id)).where(
+                CropPlanting.organization_id == org_id, CropPlanting.status.notin_(INACTIVE_PLANTING_STATUSES),
+            )
+        )).scalar_one()
+        if planting_count > target_tier.max_crop_plantings:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"You currently have {planting_count} active crop plantings, which is more than the "
+                f"'{target_tier.name}' plan's limit of {target_tier.max_crop_plantings}. "
+                f"Archive or close plantings before downgrading.",
             )
 
 

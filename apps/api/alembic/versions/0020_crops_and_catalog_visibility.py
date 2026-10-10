@@ -226,6 +226,14 @@ def downgrade() -> None:
     bind = op.get_bind()
     bind.execute(text("DELETE FROM role_permissions WHERE permission_id IN "
                        "(SELECT id FROM permissions WHERE code LIKE 'crops.%')"))
+    # The Crop Manager role is also granted non-crops.* permissions (e.g.
+    # reports.view, search.use) and may be assigned to users, so every FK child
+    # row must go before the role itself or the DELETE violates
+    # fk_role_permissions_role_id_roles / the user_roles FK.
+    bind.execute(text("DELETE FROM user_roles WHERE role_id IN "
+                       "(SELECT id FROM roles WHERE name = :name)"), {"name": CROP_MANAGER_ROLE_NAME})
+    bind.execute(text("DELETE FROM role_permissions WHERE role_id IN "
+                       "(SELECT id FROM roles WHERE name = :name)"), {"name": CROP_MANAGER_ROLE_NAME})
     bind.execute(text("DELETE FROM roles WHERE name = :name"), {"name": CROP_MANAGER_ROLE_NAME})
     bind.execute(text("DELETE FROM permissions WHERE code LIKE 'crops.%'"))
 

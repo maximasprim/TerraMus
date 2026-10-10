@@ -144,6 +144,7 @@ async def get_org_catalog_settings(
     admin: PlatformAdmin = Depends(get_current_platform_admin),
     db: AsyncSession = Depends(get_db),
 ):
+    await service.get_organization(db, org_id)  # 404 for an unknown org instead of a FK error
     return await catalog_service.get_or_create_settings(db, org_id)
 
 
@@ -158,6 +159,7 @@ async def update_org_catalog_settings(
     Omitted fields are left as-is; see TenantCatalogSettingsUpdate's
     docstring for the distinction between omitting a list, passing [], and
     the explicit clear_*_restriction flags."""
+    await service.get_organization(db, org_id)  # 404 for an unknown org instead of a FK error
     return await catalog_service.update_settings(db, org_id, req)
 
 

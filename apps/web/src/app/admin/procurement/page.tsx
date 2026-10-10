@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AdminShell } from "@/components/admin-shell";
+import { EditEntityModal } from "@/components/edit-entity-modal";
+import { useCan } from "@/lib/use-auth";
 import { Card, Button, Input, Select, Textarea, Modal, ErrorState, EmptyState, StatusBadge } from "@/components/ui";
 import { BulkImportModal } from "@/components/bulk-import-modal";
 import { apiFetch, ApiError } from "@/lib/api";
@@ -12,6 +14,8 @@ import type { Supplier, PurchaseOrder, InventoryItem } from "@/lib/types";
 export default function ProcurementPage() {
   const queryClient = useQueryClient();
   const [supplierModalOpen, setSupplierModalOpen] = useState(false);
+  const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
+  const can = useCan();
   const [poModalOpen, setPoModalOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [supplierError, setSupplierError] = useState<string | null>(null);
@@ -81,7 +85,12 @@ export default function ProcurementPage() {
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
             {suppliersQuery.data.map((s) => (
               <Card key={s.id}>
-                <h3 className="font-display text-lg text-forest">{s.name}</h3>
+                <div className="flex items-start justify-between gap-2">
+                  <h3 className="font-display text-lg text-forest">{s.name}</h3>
+                  {can("procurement.manage") && (
+                    <button type="button" onClick={() => setEditingSupplier(s)} className="rounded border border-hairline px-2 py-0.5 text-xs text-forest hover:bg-forest/5">Edit</button>
+                  )}
+                </div>
                 <p className="text-sm text-muted">{s.contact_person ?? "-"}</p>
                 <p className="text-xs text-muted">{s.phone ?? s.email ?? "No contact info"}</p>
               </Card>
@@ -145,6 +154,9 @@ export default function ProcurementPage() {
         />
       </Modal>
 
+      {editingSupplier && (
+        <EditEntityModal entity="suppliers" id={editingSupplier.id} record={editingSupplier} open onClose={() => setEditingSupplier(null)} invalidate={[["suppliers"]]} />
+      )}
       <BulkImportModal
         open={importOpen}
         onClose={() => setImportOpen(false)}

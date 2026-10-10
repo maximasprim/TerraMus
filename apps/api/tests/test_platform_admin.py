@@ -6,7 +6,7 @@ from sqlalchemy import select
 pytestmark = pytest.mark.asyncio
 
 
-async def _make_platform_admin(engine, email="admin@platform.test", password="adminpass123"):
+async def _make_platform_admin(engine, email="admin@platform.example.com", password="adminpass123"):
     """No HTTP endpoint creates the first platform admin (by design - see
     platform_admin/service.py's comment on create_platform_admin), so tests
     insert one directly, the same way scripts/seed_platform_admin.py would
@@ -24,7 +24,7 @@ async def _make_platform_admin(engine, email="admin@platform.test", password="ad
         return admin.id
 
 
-async def _platform_login(client, email="admin@platform.test", password="adminpass123"):
+async def _platform_login(client, email="admin@platform.example.com", password="adminpass123"):
     resp = await client.post(
         "/api/v1/platform/auth/login",
         data={"username": email, "password": password},
@@ -181,10 +181,10 @@ async def test_cross_tenant_livestock_crud_and_audit_log(client, engine):
 
 
 async def test_platform_admin_password_reset_flow(client, engine):
-    admin_id = await _make_platform_admin(engine, email="reset-admin@platform.test", password="oldpassword123")
+    admin_id = await _make_platform_admin(engine, email="reset-admin@platform.example.com", password="oldpassword123")
 
     req = await client.post(
-        "/api/v1/platform/auth/password-reset/request", json={"email": "reset-admin@platform.test"},
+        "/api/v1/platform/auth/password-reset/request", json={"email": "reset-admin@platform.example.com"},
     )
     assert req.status_code == 200
 
@@ -197,7 +197,7 @@ async def test_platform_admin_password_reset_flow(client, engine):
     SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
     async with SessionLocal() as session:
         result = await session.execute(
-            select(EmailOutbox).where(EmailOutbox.to_email == "reset-admin@platform.test")
+            select(EmailOutbox).where(EmailOutbox.to_email == "reset-admin@platform.example.com")
         )
         outbox = result.scalar_one()
         raw_token = outbox.body_text.split("token=")[1].split("\n")[0].strip()
@@ -209,12 +209,12 @@ async def test_platform_admin_password_reset_flow(client, engine):
     assert confirm.status_code == 200
 
     old_login = await client.post(
-        "/api/v1/platform/auth/login", data={"username": "reset-admin@platform.test", "password": "oldpassword123"},
+        "/api/v1/platform/auth/login", data={"username": "reset-admin@platform.example.com", "password": "oldpassword123"},
     )
     assert old_login.status_code == 401
 
     new_login = await client.post(
-        "/api/v1/platform/auth/login", data={"username": "reset-admin@platform.test", "password": "newpassword456"},
+        "/api/v1/platform/auth/login", data={"username": "reset-admin@platform.example.com", "password": "newpassword456"},
     )
     assert new_login.status_code == 200
 
@@ -226,7 +226,7 @@ async def test_platform_admin_management(client, engine):
 
     created = await client.post(
         "/api/v1/platform/admins", json={
-            "email": "second-admin@platform.test", "full_name": "Second Admin", "password": "somepassword123",
+            "email": "second-admin@platform.example.com", "full_name": "Second Admin", "password": "somepassword123",
         },
         headers=headers,
     )
@@ -235,7 +235,7 @@ async def test_platform_admin_management(client, engine):
     listed = await client.get("/api/v1/platform/admins", headers=headers)
     assert listed.status_code == 200
     emails = {a["email"] for a in listed.json()}
-    assert "second-admin@platform.test" in emails
+    assert "second-admin@platform.example.com" in emails
 
     deactivate = await client.patch(
         f"/api/v1/platform/admins/{created.json()['id']}/status", json={"is_active": False}, headers=headers,
@@ -251,7 +251,7 @@ async def test_viewer_role_can_read_but_not_write(client, engine):
 
     created = await client.post(
         "/api/v1/platform/admins", json={
-            "email": "viewer@platform.test", "full_name": "Viewer Admin",
+            "email": "viewer@platform.example.com", "full_name": "Viewer Admin",
             "password": "viewerpass123", "role": "viewer",
         },
         headers={"Authorization": f"Bearer {superadmin_token}"},
@@ -260,7 +260,7 @@ async def test_viewer_role_can_read_but_not_write(client, engine):
     assert created.json()["role"] == "viewer"
 
     viewer_login = await client.post(
-        "/api/v1/platform/auth/login", data={"username": "viewer@platform.test", "password": "viewerpass123"},
+        "/api/v1/platform/auth/login", data={"username": "viewer@platform.example.com", "password": "viewerpass123"},
     )
     viewer_token = viewer_login.json()["access_token"]
     viewer_headers = {"Authorization": f"Bearer {viewer_token}"}
@@ -366,3 +366,93 @@ async def test_audit_middleware_logs_generic_writes_without_duplicating_manual_o
             )
         )).scalars().all()
         assert len(generic_livestock_logs) == 0
+
+
+# ---- audit coverage: exact self-audited routes only -------------------------------------------------
+
+def test_is_self_audited_matches_only_the_routes_that_log_themselves():
+    from app.modules.platform_admin.audit_middleware import is_self_audited
+    i = "11111111-2222-3333-4444-555555555555"
+    # routes with their own audit call -> skipped by the middleware (no double logging)
+    for method, path in [
+        ("PATCH", "/status"), ("POST", "/livestock"), ("POST", f"/livestock/{i}/status"), ("PATCH", f"/livestock/{i}"),
+        ("POST", "/crops"), ("POST", f"/crops/{i}/status"), ("PATCH", f"/crops/{i}"),
+    ]:
+        assert is_self_audited(method, path), (method, path)
+    # everything else MUST be audited generically - these were silently exempt before
+    for method, path in [
+        ("PATCH", f"/procurement/purchase-orders/{i}/status"), ("PATCH", f"/employees/{i}/status"),
+        ("PATCH", f"/commerce/orders/{i}/status"), ("POST", f"/livestock/{i}/health"),
+        ("POST", f"/livestock/{i}/lactation-cycles"), ("POST", f"/livestock/{i}/dry-off"),
+        ("POST", f"/livestock/{i}/milk-records"), ("POST", f"/crops/{i}/harvests"),
+        ("POST", "/customers"), ("DELETE", f"/livestock/{i}"), ("PATCH", f"/livestock/{i}/status"),
+    ]:
+        assert not is_self_audited(method, path), (method, path)
+
+
+async def test_status_changes_by_platform_admin_are_now_audited(client, engine):
+    await _make_platform_admin(engine)
+    await _register_org(client, "Farm Q", "q@example.com")
+    headers = {"Authorization": f"Bearer {await _platform_login(client)}"}
+    org_id = next(o["id"] for o in (await client.get("/api/v1/platform/organizations", headers=headers)).json() if o["name"] == "Farm Q")
+
+    emp = await client.post(f"/api/v1/platform/organizations/{org_id}/employees", json={"full_name": "Audit Employee"}, headers=headers)
+    assert emp.status_code == 200, emp.text
+    changed = await client.patch(
+        f"/api/v1/platform/organizations/{org_id}/employees/{emp.json()['id']}/status", json={"status": "on_leave"}, headers=headers,
+    )
+    assert changed.status_code == 200, changed.text
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from app.modules.identity.models import AuditLog
+    async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+        rows = (await session.execute(select(AuditLog).where(
+            AuditLog.organization_id == uuid.UUID(org_id), AuditLog.entity_type == "employees",
+        ))).scalars().all()
+    paths = [r.new_value["path"] for r in rows if r.new_value]
+    assert any(p.endswith("/status") for p in paths), "employee status change was not audited"
+    assert len(rows) == 2  # the create + the status change, one row each
+
+
+async def test_crop_planting_create_is_logged_once_not_twice(client, engine):
+    await _make_platform_admin(engine)
+    tenant = await _register_org(client, "Farm R", "r@example.com")
+    headers = {"Authorization": f"Bearer {await _platform_login(client)}"}
+    org_id = next(o["id"] for o in (await client.get("/api/v1/platform/organizations", headers=headers)).json() if o["name"] == "Farm R")
+    farm = await client.post("/api/v1/farms", json={"name": "Main Farm", "county": "Nakuru"}, headers={"Authorization": f"Bearer {tenant['access_token']}"})
+
+    created = await client.post(
+        f"/api/v1/platform/organizations/{org_id}/crops",
+        json={"farm_id": farm.json()["id"], "planting_number": "AUD-1", "crop_type": "maize", "planting_date": "2026-01-01"},
+        headers=headers,
+    )
+    assert created.status_code == 200, created.text
+
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from app.modules.identity.models import AuditLog
+    async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+        manual = (await session.execute(select(AuditLog).where(AuditLog.organization_id == uuid.UUID(org_id), AuditLog.action == "crops.create"))).scalars().all()
+        generic = (await session.execute(select(AuditLog).where(
+            AuditLog.organization_id == uuid.UUID(org_id), AuditLog.entity_type == "crops", AuditLog.action == "platform_admin.post",
+        ))).scalars().all()
+    assert len(manual) == 1 and len(generic) == 0
+
+
+async def test_platform_admin_passwords_must_be_at_least_12_characters(client, engine):
+    await _make_platform_admin(engine)
+    headers = {"Authorization": f"Bearer {await _platform_login(client)}"}
+    base = {"email": "new.admin@platform.example.com", "full_name": "New Admin", "role": "viewer"}
+
+    short = await client.post("/api/v1/platform/admins", json={**base, "password": "short-pass1"}, headers=headers)  # 11 chars
+    assert short.status_code == 422
+    too_long = await client.post("/api/v1/platform/admins", json={**base, "password": "x" * 73}, headers=headers)
+    assert too_long.status_code == 422
+    ok = await client.post("/api/v1/platform/admins", json={**base, "password": "twelve-chars"}, headers=headers)  # exactly 12
+    assert ok.status_code in (200, 201), ok.text
+
+
+async def test_platform_admin_login_still_accepts_existing_short_passwords(client, engine):
+    """The floor applies when a password is SET, never on login - otherwise existing admins would be locked out."""
+    await _make_platform_admin(engine, email="legacy@platform.example.com", password="short1")
+    token = await _platform_login(client, email="legacy@platform.example.com", password="short1")  # asserts 200 itself
+    assert token

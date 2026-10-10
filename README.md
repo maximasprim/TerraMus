@@ -653,3 +653,49 @@ and payment recording on `/admin/orders/[id]`.
 Same verification status as Phases 26/28 throughout - see
 `apps/web/README.md`'s Phase 29 section and `docs/architecture.md`'s
 matching entry for full detail.
+
+## Phase 30 - storefront, photos, inbox, hardening, and a contract audit
+
+**Public site.** `/shop/[org]` was redesigned as a modern store: header with
+search/cart, home (hero carousel, categories, featured deals, produce and
+livestock rows, story, testimonials, blog, FAQs), a filterable `/store`,
+`/about`, `/contact`, and a product page with a photo gallery and buy box. Shoppers
+can now pay online with **M-Pesa** (STK push, polled until the callback confirms)
+or settle offline with the farm. Card payments are not wired (see "Not done").
+
+**New features.** Multiple photos per listing (stored in Postgres by default, or in a
+Supabase Storage bucket with `STORAGE_BACKEND=supabase`), a contact-form inbox
+(`/admin/inquiries`), an audit-log viewer (`/admin/audit`), edit screens for animals,
+crops, assets, employees and suppliers, reservation creation / clearing expired
+holds, livestock CSV/PDF export, and a permission-aware admin (menu items, pages and
+write buttons follow the signed-in user's role). Migrations `0023`-`0027`.
+
+**Hardening.** The public mock-payment webhook (a free "paid" order) is closed - mock
+is development-only; public checkout/contact/payment are rate limited and use the real
+client IP behind a load balancer (`TRUSTED_PROXY_COUNT`); abandoned guest orders expire
+and re-list their animal; the platform audit middleware logs every platform write exactly
+once; platform-admin passwords need 12+ characters; billing mutations need `users.manage`;
+custom domains need DNS proof before they are routed or registered with Vercel and can no
+longer be squatted; crop plantings have a plan cap; refresh-token rotation no longer logs
+users out under parallel requests; Terraform keeps secrets in Secrets Manager.
+See `docs/public-site-additions.md` for every setting.
+
+**Contract audit.** `python scripts/contract_audit/run.py` compares every frontend API
+call, response type, request body, query parameter, dropdown list, edit form, permission
+code and platform screen with the backend's real routes and schemas (no server, database or
+network needed; exits non-zero on a serious mismatch, so it suits CI). It found, among
+others, the dashboard `undefined` bug, super-admin status changes using the wrong HTTP verb,
+and lists silently truncated at the first page.
+
+**Verification status.** Static checks (compilation, import resolution, model-vs-migration
+drift, migration chain, the audit above, `tsc --noEmit`) and the pure-logic tests pass. The
+database-backed tests added in this phase follow the existing harness but were written without
+a Postgres to run them against - run `pytest` before relying on them. The storefront redesign and
+photo upload (including Supabase) were exercised in a browser by the project owner; the screens added
+afterwards (edit forms, audit viewer, reservations form, M-Pesa payment panel, permission-aware buttons)
+have only been type-checked and audited against the backend, not clicked through.
+
+**Not done.** Card (Stripe) checkout on the storefront needs Stripe.js plus exposing the
+PaymentIntent `client_secret`. Analytics endpoints (`/health/due`, `/breeding/upcoming-deliveries`,
+`/dairy/summary`, per-animal profitability) have no UI. The Terraform changes have never been
+`plan`ned.

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AdminShell } from "@/components/admin-shell";
+import { Can } from "@/components/can";
 import { Card, Button, Input, Select, Modal, ErrorState } from "@/components/ui";
 import { apiFetch, ApiError } from "@/lib/api";
 import type { InventoryItem, StockMovement } from "@/lib/types";
@@ -62,7 +63,7 @@ export default function InventoryItemDetailPage() {
       )}
 
       <div className="mb-4 flex justify-end">
-        <Button onClick={() => { setError(null); setModalOpen(true); }}>+ Record movement</Button>
+        <Can permission="inventory.adjust"><Button onClick={() => { setError(null); setModalOpen(true); }}>+ Record movement</Button></Can>
       </div>
 
       <Card>

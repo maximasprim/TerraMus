@@ -27,6 +27,9 @@ export interface ModuleField {
   label: string;
   type: FieldType;
   required?: boolean;
+  /** Accepted on create but NOT by the backend's update schema (e.g. an animal's species),
+   * so it is hidden in the edit form instead of offering an edit that is silently ignored. */
+  createOnly?: boolean;
   options?: string[]; // for type: "select"
   hint?: string; // e.g. "(UUID - paste from Farms)" for relational fields
 }
@@ -34,7 +37,7 @@ export interface ModuleField {
 export interface ModuleColumn {
   key: string;
   label: string;
-  format?: "date" | "currency" | "badge" | "raw";
+  format?: "date" | "currency" | "badge" | "shortid" | "raw";
 }
 
 export interface ModuleConfig {
@@ -46,7 +49,7 @@ export interface ModuleConfig {
   editExtraFields?: ModuleField[]; // fields valid on PATCH but not on create (e.g. status), shown only in the edit form
   createPath?: (orgId: string) => string;
   itemPath?: (orgId: string, id: string) => string; // PATCH target for edit
-  statusAction?: { field: string; label: string; options: string[]; path: (orgId: string, id: string) => string };
+  statusAction?: { field: string; label: string; options: string[]; path: (orgId: string, id: string) => string; /** HTTP verb the backend route uses; defaults to PATCH (livestock/crops status routes are POST). */ method?: "PATCH" | "POST" };
   /** For a single irreversible-ish POST action with no body, like
    * deactivate_listing - a confirm dialog, not a modal form. */
   simpleAction?: { label: string; confirmText: string; path: (orgId: string, id: string) => string };
@@ -67,14 +70,14 @@ export const PLATFORM_MODULES: ModuleConfig[] = [
       { key: "breed", label: "Breed" }, { key: "sex", label: "Sex" }, { key: "status", label: "Status", format: "badge" },
     ],
     fields: [
-      { name: "farm_id", label: "Farm", type: "farm_picker", required: true },
-      { name: "animal_number", label: "Animal number", type: "text", required: true },
-      { name: "species", label: "Species", type: "select", required: true, options: ["cattle", "sheep"] },
+      { name: "farm_id", createOnly: true, label: "Farm", type: "farm_picker", required: true },
+      { name: "animal_number", createOnly: true, label: "Animal number", type: "text", required: true },
+      { name: "species", createOnly: true, label: "Species", type: "select", required: true, options: ["cattle", "sheep"] },
       { name: "breed", label: "Breed", type: "text" },
-      { name: "sex", label: "Sex", type: "select", required: true, options: ["male", "female"] },
-      { name: "acquisition_date", label: "Acquisition date", type: "date", required: true },
-      { name: "acquisition_method", label: "Acquisition method", type: "select", required: true, options: ["purchased", "born_on_farm", "transferred_in", "gifted"] },
-      { name: "acquisition_cost", label: "Acquisition cost (KES)", type: "number" },
+      { name: "sex", createOnly: true, label: "Sex", type: "select", required: true, options: ["male", "female"] },
+      { name: "acquisition_date", createOnly: true, label: "Acquisition date", type: "date", required: true },
+      { name: "acquisition_method", createOnly: true, label: "Acquisition method", type: "select", required: true, options: ["purchased", "born_on_farm", "transferred_in", "gifted"] },
+      { name: "acquisition_cost", createOnly: true, label: "Acquisition cost (KES)", type: "number" },
     ],
     // The closest thing to "delete" this product has: there is no hard
     // delete for an animal anywhere (tenant-side either) - herd financial
@@ -84,6 +87,7 @@ export const PLATFORM_MODULES: ModuleConfig[] = [
     statusAction: {
       field: "status", label: "Change status (incl. archive)",
       options: ["active", "for_sale", "reserved", "sold", "transferred", "deceased", "missing", "quarantined", "archived"],
+      method: "POST", // backend exposes POST (not PATCH) for this route
       path: (org, id) => `/api/v1/platform/organizations/${org}/livestock/${id}/status`,
     },
   },
@@ -98,13 +102,13 @@ export const PLATFORM_MODULES: ModuleConfig[] = [
       { key: "variety", label: "Variety" }, { key: "status", label: "Status", format: "badge" },
     ],
     fields: [
-      { name: "farm_id", label: "Farm", type: "farm_picker", required: true },
+      { name: "farm_id", createOnly: true, label: "Farm", type: "farm_picker", required: true },
       { name: "location_id", label: "Location", type: "location_picker" },
-      { name: "planting_number", label: "Planting number", type: "text", required: true },
+      { name: "planting_number", createOnly: true, label: "Planting number", type: "text", required: true },
       // Mirrors apps/api/app/modules/crops/catalog.py's CROP_TYPE_CODES -
       // kept in sync by hand, same convention as livestock's species list
       // above; the backend catalog is still the source of truth/enforcement.
-      { name: "crop_type", label: "Crop type", type: "select", required: true, options: [
+      { name: "crop_type", createOnly: true, label: "Crop type", type: "select", required: true, options: [
         "napier_grass", "rhodes_grass", "lucerne", "desmodium", "boma_rhodes", "oat_hay",
         "tea", "coffee", "avocado", "macadamia", "mango", "banana", "passion_fruit", "sugarcane",
         "french_beans", "snow_peas", "tomatoes", "kale_sukuma_wiki", "onions", "cabbage", "capsicum",
@@ -114,14 +118,14 @@ export const PLATFORM_MODULES: ModuleConfig[] = [
         "roses", "other_cut_flowers",
       ] },
       { name: "variety", label: "Variety", type: "text", hint: "e.g. \"Hass\" avocado, \"Purple Napier\"" },
-      { name: "planting_date", label: "Planting date", type: "date", required: true },
-      { name: "planting_method", label: "Planting method", type: "select", options: ["seed", "seedling", "cutting", "grafted", "tissue_culture"] },
-      { name: "area_size", label: "Area size", type: "number" },
-      { name: "area_unit", label: "Area unit", type: "select", options: ["acres", "hectares"] },
+      { name: "planting_date", createOnly: true, label: "Planting date", type: "date", required: true },
+      { name: "planting_method", createOnly: true, label: "Planting method", type: "select", options: ["seed", "seedling", "cutting", "grafted", "tissue_culture"] },
+      { name: "area_size", createOnly: true, label: "Area size", type: "number" },
+      { name: "area_unit", createOnly: true, label: "Area unit", type: "select", options: ["acres", "hectares"] },
       { name: "expected_harvest_date", label: "Expected harvest date", type: "date" },
-      { name: "acquisition_cost", label: "Acquisition/input cost (KES)", type: "number" },
-      { name: "source", label: "Source", type: "text" },
-      { name: "supplier", label: "Supplier", type: "text" },
+      { name: "acquisition_cost", createOnly: true, label: "Acquisition/input cost (KES)", type: "number" },
+      { name: "source", createOnly: true, label: "Source", type: "text" },
+      { name: "supplier", createOnly: true, label: "Supplier", type: "text" },
       { name: "notes", label: "Notes", type: "textarea" },
     ],
     // Mirrors apps/api/app/modules/crops/models.py's PLANTING_STATUSES /
@@ -130,6 +134,7 @@ export const PLATFORM_MODULES: ModuleConfig[] = [
     statusAction: {
       field: "status", label: "Change status",
       options: ["growing", "ready_for_harvest", "harvesting", "harvested", "fallow", "failed", "archived"],
+      method: "POST", // backend exposes POST (not PATCH) for this route
       path: (org, id) => `/api/v1/platform/organizations/${org}/crops/${id}/status`,
     },
   },
@@ -171,7 +176,7 @@ export const PLATFORM_MODULES: ModuleConfig[] = [
       { name: "employment_type", label: "Employment type", type: "select", options: ["full_time", "part_time", "casual", "contract"] },
       { name: "assigned_farm_id", label: "Assigned farm", type: "farm_picker" },
       { name: "assigned_location_id", label: "Assigned location", type: "location_picker" },
-      { name: "hire_date", label: "Hire date", type: "date" },
+      { name: "hire_date", createOnly: true, label: "Hire date", type: "date" },
       { name: "notes", label: "Notes", type: "textarea" },
     ],
     statusAction: {
@@ -192,11 +197,11 @@ export const PLATFORM_MODULES: ModuleConfig[] = [
     ],
     fields: [
       { name: "name", label: "Name", type: "text", required: true },
-      { name: "asset_type", label: "Type", type: "select", required: true, options: ["vehicle", "equipment", "structure", "tool", "other"] },
+      { name: "asset_type", createOnly: true, label: "Type", type: "select", required: true, options: ["vehicle", "equipment", "structure", "tool", "other"] },
       { name: "serial_number", label: "Serial number", type: "text" },
-      { name: "condition", label: "Condition", type: "select", options: ["excellent", "good", "fair", "poor"] },
-      { name: "acquisition_date", label: "Acquisition date", type: "date" },
-      { name: "acquisition_cost", label: "Acquisition cost (KES)", type: "number" },
+      { name: "condition", label: "Condition", type: "select", options: ["excellent", "good", "fair", "poor", "out_of_service"] },
+      { name: "acquisition_date", createOnly: true, label: "Acquisition date", type: "date" },
+      { name: "acquisition_cost", createOnly: true, label: "Acquisition cost (KES)", type: "number" },
       { name: "assigned_farm_id", label: "Assigned farm", type: "farm_picker" },
       { name: "assigned_location_id", label: "Assigned location", type: "location_picker" },
       { name: "supplier_id", label: "Supplier", type: "supplier_picker" },
@@ -273,12 +278,12 @@ export const PLATFORM_MODULES: ModuleConfig[] = [
     label: "Orders",
     listPath: (org) => `/api/v1/platform/organizations/${org}/commerce/orders`,
     columns: [
-      { key: "order_number", label: "Order #" }, { key: "customer_id", label: "Customer" },
+      { key: "id", label: "Order #", format: "shortid" }, { key: "customer_id", label: "Customer" },
       { key: "status", label: "Status", format: "badge" }, { key: "total_amount", label: "Total", format: "currency" },
     ],
     statusAction: {
       field: "status", label: "Change order status",
-      options: ["pending", "payment_pending", "paid", "processing", "ready_for_fulfillment", "dispatched", "delivered", "completed", "cancelled"],
+      options: ["pending", "payment_pending", "paid", "processing", "ready_for_fulfillment", "dispatched", "delivered", "completed", "cancelled", "failed", "refunded", "partially_refunded"],
       path: (org, id) => `/api/v1/platform/organizations/${org}/commerce/orders/${id}/status`,
     },
   },

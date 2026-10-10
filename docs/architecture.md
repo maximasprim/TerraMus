@@ -937,3 +937,23 @@ Same verification status as every phase since 12: written, reviewed
 across all 49 frontend files as of this phase; the two backend additions
 are `py_compile`-clean with new tests in `test_auth_and_rbac.py` and
 `test_commerce.py`), never executed.
+
+## Phase 30 - gaps closed after the storefront redesign
+
+Everything here is additive; migrations `0023`-`0027` only add tables/columns/indexes and all
+downgrade cleanly.
+
+| Gap | Resolution |
+|---|---|
+| Platform audit skipped any `/status` route and every livestock POST, and logged crop writes twice | `audit_middleware.is_self_audited` is an exact method+path allow-list of the routes that audit themselves |
+| Platform-admin passwords had no minimum | 12-72 characters on create and reset (not on login, so existing admins keep working); seed script and forms agree |
+| Billing subscribe / payment history were open to any signed-in user; malformed receipt id was a 500 | require `users.manage`; receipt id typed as UUID (422) |
+| First claimant of a custom domain locked everyone out; Vercel registered before ownership proof; unverified claimant could unregister a verified domain | claims never block; one *verified* holder (partial unique index, migration 0026); DNS proof evicts a stale holder; Vercel only after verification; strict hostname validation |
+| Crops bypassed plan limits | `max_crop_plantings` on tiers (0027), enforced on create and on downgrade |
+| Parallel requests rotated the refresh token several times and logged users out | single-flight refresh + "someone already refreshed" detection; downloads retry once |
+| Customers could not pay online | M-Pesa panel on the order page; `GET /public/payment-methods` lists only fully configured methods; phone numbers normalised to `2547XXXXXXXX` everywhere (guest, staff, billing) |
+| Lists silently stopped at the first page | `apiFetchAll` / `platformApiFetchAll`; deterministic `(created_at, id)` ordering |
+| Validation errors displayed as raw JSON | `formatErrorDetail` in both API clients |
+| Admin ignored the `permissions` the backend already sends | `lib/permissions.ts` map (verified by the audit), `<Can>` / `useCan`, access-denied page, role-aware landing page |
+| No edit UI for 5 entities; no audit viewer; reservations could not be created | `EditEntityModal` driven by `lib/edit-configs.ts` (audit-verified against the `*Update` schemas); `/admin/audit` (audit route gained filters, paging and `user_name`); reservation form + "Clear expired" |
+| Secrets in the ECS task definition; no CORS / site URL settings | Secrets Manager + `secrets` block; optional `cors_origins`, `public_site_base_url`, `extra_environment`, `extra_secrets` variables |

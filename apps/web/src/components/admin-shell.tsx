@@ -1,10 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useEffect } from "react";
 import { clsx } from "clsx";
-import { LayoutDashboard, Beef, Sprout, LogOut, MapPin, Users, ShoppingCart, Tag, Package, Wallet, Truck, UserCog, Wrench, Search, Settings, UsersRound, CalendarClock, Bell, Newspaper, CreditCard, ExternalLink, Inbox } from "lucide-react";
+import { LayoutDashboard, Beef, Sprout, LogOut, MapPin, Users, ShoppingCart, Tag, Package, Wallet, Truck, UserCog, Wrench, Search, Settings, UsersRound, CalendarClock, Bell, Newspaper, CreditCard, ExternalLink, Inbox, History } from "lucide-react";
 import { useRequireAuth, useLogout } from "@/lib/use-auth";
+import { canAccessPath, firstAccessiblePath } from "@/lib/permissions";
+import { useCatalog } from "@/lib/use-catalog";
 
 const NAV = [
   { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -24,6 +27,7 @@ const NAV = [
   { href: "/admin/inquiries", label: "Inquiries", icon: Inbox },
   { href: "/admin/cms", label: "Site Content", icon: Newspaper },
   { href: "/admin/notifications", label: "Notifications", icon: Bell },
+  { href: "/admin/audit", label: "Audit log", icon: History },
   { href: "/admin/users", label: "Team", icon: UsersRound },
   { href: "/admin/search", label: "Search", icon: Search },
   { href: "/admin/settings", label: "Settings", icon: Settings },
@@ -32,7 +36,24 @@ const NAV = [
 export function AdminShell({ children }: { children: React.ReactNode }) {
   const { me, ready } = useRequireAuth();
   const logout = useLogout();
+  // Modules a platform admin has switched off for this organization are left out of the
+  // sidebar. Fails open: until /catalog has loaded (or if it errors) every entry shows.
+  const { data: catalog } = useCatalog(ready);
+  const moduleOff = (href: string) =>
+    (href === "/admin/livestock" && catalog?.livestock_enabled === false) ||
+    (href === "/admin/crops" && catalog?.crops_enabled === false);
   const pathname = usePathname();
+  const router = useRouter();
+
+  // Permission-aware UI (see lib/permissions.ts). `permissions` is undefined until
+  // /auth/me has loaded, in which case everything is allowed - fail open.
+  const permissions = me?.permissions;
+  const allowed = canAccessPath(permissions, pathname);
+  const sendToLanding = !allowed && pathname === "/admin/dashboard";
+  useEffect(() => {
+    // Roles without dashboard access (e.g. Farm Worker) are routed to the first page they can use.
+    if (sendToLanding) router.replace(firstAccessiblePath(permissions));
+  }, [sendToLanding, permissions, router]);
 
   if (!ready) {
     return (
@@ -61,7 +82,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           )}
         </div>
         <nav className="flex-1 space-y-1 px-3 py-4">
-          {NAV.map(({ href, label, icon: Icon }) => (
+          {NAV.filter(({ href }) => canAccessPath(permissions, href) && !moduleOff(href)).map(({ href, label, icon: Icon }) => (
             <Link
               key={href}
               href={href}
@@ -83,7 +104,23 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           Sign out
         </button>
       </aside>
-      <main className="flex-1 overflow-y-auto p-3">{children}</main>
+      <main className="flex-1 overflow-y-auto p-8">
+        {allowed ? (
+          children
+        ) : sendToLanding ? (
+          <p className="text-sm text-muted">Taking you to your workspace…</p>
+        ) : (
+          <div className="mx-auto mt-16 max-w-md rounded-lg border border-hairline bg-white p-8 text-center">
+            <h1 className="font-display text-xl text-forest">You don&apos;t have access to this page</h1>
+            <p className="mt-2 text-sm text-muted">
+              Your role doesn&apos;t include this area. If you need it, ask the farm owner to update your role under Team.
+            </p>
+            <Link href={firstAccessiblePath(permissions)} className="mt-5 inline-block rounded-md bg-forest px-5 py-2.5 text-sm font-medium text-paper hover:bg-forest/90">
+              Go to my workspace
+            </Link>
+          </div>
+        )}
+      </main>
     </div>
   );
 }

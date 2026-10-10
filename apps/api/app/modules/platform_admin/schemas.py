@@ -4,6 +4,13 @@ from datetime import datetime
 from pydantic import BaseModel, EmailStr, Field
 
 
+# Platform admins can see and change every tenant, so their passwords get a
+# stricter floor than tenant users' (8). The upper bound is bcrypt's 72-byte
+# limit - anything longer is silently truncated by the hash, so reject it instead.
+PLATFORM_PASSWORD_MIN = 12
+PLATFORM_PASSWORD_MAX = 72
+
+
 class PlatformAdminLoginRequest(BaseModel):
     email: EmailStr
     password: str
@@ -53,7 +60,8 @@ class OrganizationStatusUpdate(BaseModel):
 class PlatformAdminCreateRequest(BaseModel):
     email: EmailStr
     full_name: str
-    password: str
+    # no minimum on LOGIN (existing admins keep working); enforced when a password is SET
+    password: str = Field(min_length=PLATFORM_PASSWORD_MIN, max_length=PLATFORM_PASSWORD_MAX)
     role: str = Field("superadmin", pattern="^(superadmin|viewer)$")
 
 
@@ -71,7 +79,7 @@ class PlatformAdminPasswordResetRequest(BaseModel):
 
 class PlatformAdminPasswordResetConfirm(BaseModel):
     token: str
-    new_password: str
+    new_password: str = Field(min_length=PLATFORM_PASSWORD_MIN, max_length=PLATFORM_PASSWORD_MAX)
 
 
 class PlatformDashboardStats(BaseModel):

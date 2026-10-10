@@ -4,6 +4,8 @@ import { useState } from "react";
 import { useParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AdminShell } from "@/components/admin-shell";
+import { EditEntityModal } from "@/components/edit-entity-modal";
+import { useCan } from "@/lib/use-auth";
 import { Card, StatusBadge, ErrorState, Button, Input, Select } from "@/components/ui";
 import { apiFetch, ApiError } from "@/lib/api";
 import type { AssetDetail } from "@/lib/types";
@@ -13,6 +15,8 @@ const MAINTENANCE_TYPES = ["service", "repair", "inspection"] as const;
 export default function AssetDetailPage() {
   const { id } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
+  const [editOpen, setEditOpen] = useState(false);
+  const can = useCan();
   const [maintenanceType, setMaintenanceType] = useState<string>(MAINTENANCE_TYPES[0]);
   const [maintenanceDate, setMaintenanceDate] = useState("");
   const [description, setDescription] = useState("");
@@ -63,9 +67,10 @@ export default function AssetDetailPage() {
 
   return (
     <AdminShell>
+      <EditEntityModal entity="assets" id={id} record={asset} open={editOpen} onClose={() => setEditOpen(false)} invalidate={[["asset", id], ["assets"]]} />
       <div className="mb-6 flex items-start justify-between">
         <div>
-          <div className="mb-2"><StatusBadge status={asset.status} /></div>
+          <div className="mb-2 flex items-center gap-3"><StatusBadge status={asset.status} />{can("assets.manage") && <button type="button" onClick={() => setEditOpen(true)} className="rounded border border-hairline px-2 py-0.5 text-xs text-forest hover:bg-forest/5">Edit</button>}</div>
           <h1 className="font-display text-2xl text-forest">{asset.name}</h1>
           <p className="text-sm text-muted">{asset.asset_number} · {asset.asset_type.replace(/_/g, " ")}</p>
         </div>

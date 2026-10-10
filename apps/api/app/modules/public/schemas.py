@@ -148,6 +148,16 @@ class PublicOrderConfirmation(BaseModel):
     customer_email: str
 
 
+class PaymentMethodOut(BaseModel):
+    provider: str   # value for the .../pay/{provider} URL
+    label: str
+    input: str      # what the customer must supply: "phone"
+
+
+class PaymentMethodsOut(BaseModel):
+    methods: list[PaymentMethodOut]
+
+
 class PublicPaymentRequest(BaseModel):
     phone_or_token: str
     email: EmailStr  # lightweight ownership check - must match the order's customer

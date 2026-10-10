@@ -51,7 +51,7 @@ async def list_inquiries(
     query = select(ContactInquiry).where(ContactInquiry.organization_id == org_id)
     if status_filter:
         query = query.where(ContactInquiry.status == status_filter)
-    result = await db.execute(query.order_by(ContactInquiry.created_at.desc()).limit(limit).offset(offset))
+    result = await db.execute(query.order_by(ContactInquiry.created_at.desc(), ContactInquiry.id).limit(limit).offset(offset))
     return list(result.scalars().all())
 
 

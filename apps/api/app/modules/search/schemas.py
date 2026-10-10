@@ -3,7 +3,7 @@ import uuid
 from pydantic import BaseModel
 
 RESULT_TYPES = (
-    "animal", "crop_plantig", "customer", "order", "invoice", "supplier", "inventory_item", "employee", "asset",
+    "animal", "crop_planting", "customer", "order", "invoice", "supplier", "inventory_item", "employee", "asset",
 )
 
 

@@ -11,7 +11,7 @@ from app.core.database import Base, UUIDPKMixin
 # user already has, so "who gets notified" can be derived from RBAC rather
 # than a separate subscription list to maintain.
 NOTIFICATION_CATEGORIES = (
-    "health", "breeding", "inventory", "orders", "payments", "system",
+    "health", "breeding", "inventory", "orders", "payments", "system", "billing",
 )
 
 

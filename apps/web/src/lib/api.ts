@@ -35,6 +35,8 @@ export function clearTokens() {
   localStorage.removeItem(REFRESH_KEY);
 }
 
+import { fetchAllPages, formatErrorDetail, type FetchAllOptions } from "@/lib/api-utils";
+
 export class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -43,7 +45,32 @@ export class ApiError extends Error {
   }
 }
 
-async function refreshAccessToken(): Promise<string | null> {
+// The backend ROTATES refresh tokens: using one revokes it. If several requests
+// hit an expired access token at the same moment (a dashboard fires many in
+// parallel) and each refreshed on its own, the first would win and the rest
+// would be rejected - and their failure cleared the tokens, logging the user
+// out mid-session. So all concurrent refreshes share one in-flight request.
+let refreshInFlight: Promise<string | null> | null = null;
+
+function refreshAccessToken(): Promise<string | null> {
+  if (!refreshInFlight) {
+    refreshInFlight = performRefresh().finally(() => {
+      refreshInFlight = null;
+    });
+  }
+  return refreshInFlight;
+}
+
+/** Called after a 401. If a different access token is now stored, another
+ * request already refreshed while this one was in flight - just use that one
+ * instead of rotating the refresh token again. */
+async function tokenAfter401(tokenUsed: string | null): Promise<string | null> {
+  const current = getAccessToken();
+  if (current && current !== tokenUsed) return current;
+  return refreshAccessToken();
+}
+
+async function performRefresh(): Promise<string | null> {
   const refresh_token = getRefreshToken();
   if (!refresh_token) return null;
   const resp = await fetch(`${API_BASE}/api/v1/auth/refresh`, {
@@ -77,10 +104,11 @@ export async function apiFetch<T>(
     return fetch(`${API_BASE}${path}`, { ...rest, headers: finalHeaders });
   };
 
-  let resp = await doFetch(getAccessToken());
+  const tokenUsed = getAccessToken();
+  let resp = await doFetch(tokenUsed);
 
   if (resp.status === 401 && auth) {
-    const newToken = await refreshAccessToken();
+    const newToken = await tokenAfter401(tokenUsed);
     if (newToken) {
       resp = await doFetch(newToken);
     }
@@ -94,7 +122,7 @@ export async function apiFetch<T>(
     } catch {
       /* non-JSON error body */
     }
-    throw new ApiError(resp.status, typeof detail === "string" ? detail : JSON.stringify(detail));
+    throw new ApiError(resp.status, formatErrorDetail(detail));
   }
 
   if (resp.status === 204) return undefined as T;
@@ -116,9 +144,10 @@ export async function apiUpload<T>(
     return fetch(`${API_BASE}${path}`, { method: options.method ?? "POST", headers, body: formData });
   };
 
-  let resp = await doFetch(getAccessToken());
+  const tokenUsed = getAccessToken();
+  let resp = await doFetch(tokenUsed);
   if (resp.status === 401) {
-    const newToken = await refreshAccessToken();
+    const newToken = await tokenAfter401(tokenUsed);
     if (newToken) resp = await doFetch(newToken);
   }
   if (!resp.ok) {
@@ -129,7 +158,7 @@ export async function apiUpload<T>(
     } catch {
       /* non-JSON error body */
     }
-    throw new ApiError(resp.status, typeof detail === "string" ? detail : JSON.stringify(detail));
+    throw new ApiError(resp.status, formatErrorDetail(detail));
   }
   return resp.json() as Promise<T>;
 }
@@ -137,11 +166,27 @@ export async function apiUpload<T>(
 /** For binary responses (invoice/report PDFs, animal QR SVGs) - triggers a
  * browser download rather than trying to parse the response as JSON. */
 export async function apiDownload(path: string, filename: string): Promise<void> {
-  const token = getAccessToken();
-  const resp = await fetch(`${API_BASE}${path}`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-  });
-  if (!resp.ok) throw new ApiError(resp.status, resp.statusText);
+  const doFetch = (token: string | null) =>
+    fetch(`${API_BASE}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : undefined });
+
+  // Same silent refresh as apiFetch - downloads used to simply fail once the
+  // 15-minute access token had expired.
+  const tokenUsed = getAccessToken();
+  let resp = await doFetch(tokenUsed);
+  if (resp.status === 401) {
+    const newToken = await tokenAfter401(tokenUsed);
+    if (newToken) resp = await doFetch(newToken);
+  }
+  if (!resp.ok) {
+    let detail: unknown = resp.statusText;
+    try {
+      const body = await resp.json();
+      detail = body.detail ?? detail;
+    } catch {
+      /* non-JSON error body */
+    }
+    throw new ApiError(resp.status, formatErrorDetail(detail));
+  }
   const blob = await resp.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -149,4 +194,9 @@ export async function apiDownload(path: string, filename: string): Promise<void>
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+/** GET a list endpoint that paginates, returning every row (see api-utils.fetchAllPages). */
+export function apiFetchAll<T>(path: string, options?: FetchAllOptions): Promise<T[]> {
+  return fetchAllPages<T>(path, (url) => apiFetch<T[]>(url), options);
 }

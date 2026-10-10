@@ -4,6 +4,9 @@ import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AdminShell } from "@/components/admin-shell";
+import { Can } from "@/components/can";
+import { EditEntityModal } from "@/components/edit-entity-modal";
+import { useCan } from "@/lib/use-auth";
 import { Card, TagChip, StatusBadge, ErrorState, Button, Modal, Input, Select, Textarea } from "@/components/ui";
 import { apiFetch, apiDownload, getAccessToken, API_BASE, ApiError } from "@/lib/api";
 import type { Animal, AnimalEvent, HealthRecord, WeightRecord, BreedingRecord, MilkRecord, Farm, Movement } from "@/lib/types";
@@ -36,6 +39,8 @@ export default function AnimalDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [tab, setTab] = useState<Tab>("Overview");
   const [healthModalOpen, setHealthModalOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const can = useCan();
   const queryClient = useQueryClient();
 
   const animalQuery = useQuery<Animal>({
@@ -46,6 +51,10 @@ export default function AnimalDetailPage() {
     queryKey: ["animal", id, "timeline"],
     queryFn: () => apiFetch<AnimalEvent[]>(`/api/v1/livestock/${id}/timeline`),
     enabled: tab === "Timeline",
+  });
+  const completeFollowUp = useMutation({
+    mutationFn: (recordId: string) => apiFetch(`/api/v1/health/records/${recordId}/complete-follow-up`, { method: "POST" }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["health", id] }),
   });
   const healthQuery = useQuery<HealthRecord[]>({
     queryKey: ["animal", id, "health"],
@@ -227,11 +236,13 @@ export default function AnimalDetailPage() {
 
   return (
     <AdminShell>
+      <EditEntityModal entity="livestock" id={id} record={a} open={editOpen} onClose={() => setEditOpen(false)} invalidate={[["animal", id], ["livestock"]]} />
       <div className="mb-6 flex items-start justify-between">
         <div>
           <div className="mb-2 flex items-center gap-3">
             <TagChip>{a.animal_number}</TagChip>
             <StatusBadge status={a.status} />
+            {can("livestock.update") && <button type="button" onClick={() => setEditOpen(true)} className="rounded border border-hairline px-2 py-0.5 text-xs text-forest hover:bg-forest/5">Edit</button>}
           </div>
           <h1 className="font-display text-2xl text-forest">{a.name ?? a.animal_number}</h1>
           <p className="text-sm capitalize text-muted">
@@ -247,7 +258,7 @@ export default function AnimalDetailPage() {
         )}
       </div>
 
-      {ALLOWED_TRANSITIONS[a.status]?.length > 0 && (
+      {can("livestock.update") && ALLOWED_TRANSITIONS[a.status]?.length > 0 && (
         <div className="mb-6 flex flex-wrap items-center gap-2">
           <span className="text-xs uppercase tracking-wider text-muted">Change status:</span>
           {ALLOWED_TRANSITIONS[a.status].map((next) => (
@@ -334,9 +345,9 @@ export default function AnimalDetailPage() {
       {tab === "Health" && (
         <div>
           <div className="mb-4 flex justify-end">
-            <Button onClick={() => { setHealthFormError(null); setHealthModalOpen(true); }}>
+            <Can permission="health.create"><Button onClick={() => { setHealthFormError(null); setHealthModalOpen(true); }}>
               + Add health record
-            </Button>
+            </Button></Can>
           </div>
           <Card>
             {healthQuery.isLoading && <p className="text-sm text-muted">Loading…</p>}
@@ -362,6 +373,18 @@ export default function AnimalDetailPage() {
                           {record.follow_up_completed ? " (done)" : ""}
                         </span>
                       )}
+                      {record.follow_up_date && !record.follow_up_completed && (
+                        <Can permission="health.create">
+                          <button
+                            type="button"
+                            disabled={completeFollowUp.isPending}
+                            onClick={() => completeFollowUp.mutate(record.id)}
+                            className="text-forest underline underline-offset-4 disabled:opacity-50"
+                          >
+                            Mark follow-up done
+                          </button>
+                        </Can>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -382,9 +405,9 @@ export default function AnimalDetailPage() {
       {tab === "Weights" && (
         <div>
           <div className="mb-4 flex justify-end">
-            <Button onClick={() => { setWeightFormError(null); setWeightModalOpen(true); }}>
+            <Can permission="livestock.update"><Button onClick={() => { setWeightFormError(null); setWeightModalOpen(true); }}>
               + Record weight
-            </Button>
+            </Button></Can>
           </div>
           <Card>
             {weightsQuery.isLoading && <p className="text-sm text-muted">Loading…</p>}
@@ -430,9 +453,9 @@ export default function AnimalDetailPage() {
       {tab === "Breeding" && (
         <div>
           <div className="mb-4 flex justify-end">
-            <Button onClick={() => { setBreedingFormError(null); setBreedingModalOpen(true); }}>
+            <Can permission="breeding.create"><Button onClick={() => { setBreedingFormError(null); setBreedingModalOpen(true); }}>
               + Record breeding
-            </Button>
+            </Button></Can>
           </div>
           {breedingQuery.isLoading && <p className="text-sm text-muted">Loading…</p>}
           {breedingQuery.data && breedingQuery.data.length === 0 && (
@@ -459,7 +482,7 @@ export default function AnimalDetailPage() {
                     ))}
                   </ul>
                 )}
-                <div className="mt-3 flex gap-2">
+                <Can permission="breeding.create"><div className="mt-3 flex gap-2">
                   {record.pregnancy_status === "bred" && (
                     <Button
                       variant="ghost"
@@ -478,7 +501,7 @@ export default function AnimalDetailPage() {
                       Record delivery
                     </Button>
                   )}
-                </div>
+                </div></Can>
               </Card>
             ))}
           </div>
@@ -511,7 +534,7 @@ export default function AnimalDetailPage() {
 
       {tab === "Dairy" && (
         <div>
-          <div className="mb-4 flex flex-wrap justify-end gap-2">
+          <Can permission="dairy.create"><div className="mb-4 flex flex-wrap justify-end gap-2">
             <Button variant="ghost" onClick={() => startLactation.mutate(new Date().toISOString().slice(0, 10))}>
               Start lactation cycle
             </Button>
@@ -519,7 +542,7 @@ export default function AnimalDetailPage() {
               Dry off
             </Button>
             <Button onClick={() => { setMilkFormError(null); setMilkModalOpen(true); }}>+ Record milk</Button>
-          </div>
+          </div></Can>
           {dairyActionError && <div className="mb-4"><ErrorState message={dairyActionError} /></div>}
           <Card>
             {milkQuery.isLoading && <p className="text-sm text-muted">Loading…</p>}
@@ -557,9 +580,9 @@ export default function AnimalDetailPage() {
       {tab === "Movements" && (
         <div>
           <div className="mb-4 flex justify-end">
-            <Button onClick={() => { setMovementFormError(null); setMovementModalOpen(true); }}>
+            <Can permission="livestock.update"><Button onClick={() => { setMovementFormError(null); setMovementModalOpen(true); }}>
               + Record movement
-            </Button>
+            </Button></Can>
           </div>
           <Card>
             {movementsQuery.isLoading && <p className="text-sm text-muted">Loading…</p>}

@@ -107,7 +107,7 @@ async def _to_summary(db: AsyncSession, org: Organization) -> schemas.Organizati
 async def list_organizations(
     db: AsyncSession, search: str | None, page: int, page_size: int,
 ) -> list[schemas.OrganizationSummaryOut]:
-    query = select(Organization).order_by(Organization.created_at.desc())
+    query = select(Organization).order_by(Organization.created_at.desc(), Organization.id)
     if search:
         query = query.where(Organization.name.ilike(f"%{search}%"))
     query = query.offset((page - 1) * page_size).limit(page_size)

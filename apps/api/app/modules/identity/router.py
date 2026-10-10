@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -157,20 +157,36 @@ audit_router = APIRouter(prefix="/api/v1/audit-logs", tags=["audit"])
 
 @audit_router.get("", response_model=list[schemas.AuditLogOut])
 async def list_audit_logs(
+    entity_type: str | None = Query(None, max_length=128),
+    action: str | None = Query(None, max_length=128),
+    limit: int = Query(200, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     current_user: User = Depends(require_permission("audit.view")),
     db: AsyncSession = Depends(get_db),
 ):
-    """First real consumer of AuditLog (see service.update_user_roles).
-    Deliberately minimal - no pagination/filtering yet, since this is the
-    only writer so far and org-scale audit volume is still low."""
+    """Newest first. Optional exact-match filters (`entity_type`, `action`) and
+    `limit`/`offset` paging; with no parameters it behaves exactly as before
+    (latest 200). Each entry carries `user_name` when the actor is one of this
+    organization's users - it is null for system actions and for platform
+    support staff, whose ids aren't tenant users."""
     from app.modules.identity.models import AuditLog
-    result = await db.execute(
-        select(AuditLog)
+    query = (
+        select(AuditLog, User.full_name)
+        .outerjoin(User, (User.id == AuditLog.user_id) & (User.organization_id == current_user.organization_id))
         .where(AuditLog.organization_id == current_user.organization_id)
-        .order_by(AuditLog.created_at.desc())
-        .limit(200)
     )
-    return result.scalars().all()
+    if entity_type:
+        query = query.where(AuditLog.entity_type == entity_type)
+    if action:
+        query = query.where(AuditLog.action == action)
+    rows = (await db.execute(
+        query.order_by(AuditLog.created_at.desc(), AuditLog.id).limit(limit).offset(offset)
+    )).all()
+    logs = []
+    for log, user_name in rows:
+        log.user_name = user_name  # transient attribute read by AuditLogOut (not a column)
+        logs.append(log)
+    return logs
 
 
 @organization_router.get("/settings", response_model=schemas.OrganizationOut)

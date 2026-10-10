@@ -29,6 +29,8 @@ export function clearPlatformToken() {
   localStorage.removeItem(PLATFORM_ACCESS_KEY);
 }
 
+import { fetchAllPages, formatErrorDetail, type FetchAllOptions } from "@/lib/api-utils";
+
 export class PlatformApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -63,9 +65,15 @@ export async function platformApiFetch<T>(
     } catch {
       /* non-JSON error body */
     }
-    throw new PlatformApiError(resp.status, typeof detail === "string" ? detail : JSON.stringify(detail));
+    throw new PlatformApiError(resp.status, formatErrorDetail(detail));
   }
 
   if (resp.status === 204) return undefined as T;
   return resp.json() as Promise<T>;
+}
+
+/** Platform-admin GET of a paginated list, returning every row. The platform
+ * endpoints cap page_size at 100, hence the lower default. */
+export function platformApiFetchAll<T>(path: string, options?: FetchAllOptions): Promise<T[]> {
+  return fetchAllPages<T>(path, (url) => platformApiFetch<T[]>(url), { pageSize: 100, ...options });
 }

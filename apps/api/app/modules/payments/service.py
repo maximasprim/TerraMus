@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.events import publish
+from app.core.phone import normalise_ke_msisdn
 from app.modules.payments.models import Payment, PaymentWebhookEvent
 from app.modules.payments import schemas
 from app.modules.payments.providers import get_provider
@@ -26,6 +27,12 @@ async def _initiate(
             status.HTTP_409_CONFLICT,
             f"Cannot initiate payment for an order in status '{order.status}'",
         )
+    if provider_name == "mpesa":
+        # Customers type 0712 345 678 / +254 712 345 678; Daraja only accepts 2547XXXXXXXX.
+        try:
+            req = req.model_copy(update={"phone_or_token": normalise_ke_msisdn(req.phone_or_token)})
+        except ValueError as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
 
     payment = Payment(
         organization_id=org_id, order_id=order.id, provider=provider_name,

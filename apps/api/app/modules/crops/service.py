@@ -53,8 +53,10 @@ async def get_planting(db: AsyncSession, planting_id: uuid.UUID, org_id: uuid.UU
 async def create_planting(
     db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, req: schemas.CropPlantingCreate,
 ) -> CropPlanting:
+    from app.modules.billing.service import check_crop_planting_limit
     from app.modules.catalog.service import is_crop_type_allowed
 
+    await check_crop_planting_limit(db, org_id)  # plan cap (402) - the animal flow does the same via check_animal_limit
     if not await is_crop_type_allowed(db, org_id, req.crop_type):
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,

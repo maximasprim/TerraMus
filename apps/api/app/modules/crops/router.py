@@ -52,7 +52,7 @@ async def list_plantings(
         query = query.where(CropPlanting.farm_id == farm_id)
     if active_only:
         query = query.where(CropPlanting.status.notin_(INACTIVE_PLANTING_STATUSES))
-    query = query.order_by(CropPlanting.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
+    query = query.order_by(CropPlanting.created_at.desc(), CropPlanting.id).offset((page - 1) * page_size).limit(page_size)
     result = await db.execute(query)
     return result.scalars().all()
 

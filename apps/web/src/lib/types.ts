@@ -883,3 +883,21 @@ export interface ProfitabilityReport {
   least_profitable: AnimalProfitabilityDetail[];
   average_profit: string | null;
 }
+
+export interface PaymentMethod {
+  provider: string; // value for /public/{org}/orders/{id}/pay/{provider}
+  label: string;
+  input: string; // what the customer must supply, e.g. "phone"
+}
+
+export interface AuditLogEntry {
+  id: string;
+  user_id: string | null;
+  user_name: string | null; // null for system actions and platform-support staff
+  action: string;
+  entity_type: string;
+  entity_id: string | null;
+  previous_value: Record<string, unknown> | null;
+  new_value: Record<string, unknown> | null;
+  created_at: string;
+}

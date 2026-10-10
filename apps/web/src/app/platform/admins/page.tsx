@@ -160,7 +160,7 @@ function CreateAdminForm({
       <Input id="admin-name" label="Full name" required value={fullName} onChange={(e) => setFullName(e.target.value)} />
       <Input id="admin-email" label="Email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
       <Input
-        id="admin-password" label="Temporary password" type="password" required minLength={8}
+        id="admin-password" label="Temporary password (12+ characters)" type="password" required minLength={12} maxLength={72}
         value={password} onChange={(e) => setPassword(e.target.value)}
       />
       <Select id="admin-role" label="Role" value={role} onChange={(e) => setRole(e.target.value)}>

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AdminShell } from "@/components/admin-shell";
+import { Can } from "@/components/can";
 import { Card, StatCard, Button, Input, Select, Modal, ErrorState, EmptyState } from "@/components/ui";
 import { apiFetch, ApiError } from "@/lib/api";
 import type { FinanceTransaction, FinanceSummary, ProfitabilityReport } from "@/lib/types";
@@ -68,7 +69,7 @@ export default function FinancePage() {
           <h1 className="font-display text-2xl text-forest">Finance</h1>
           <p className="text-sm text-muted">Income, expenses, and per-animal profitability.</p>
         </div>
-        <Button onClick={() => { setFormError(null); setModalOpen(true); }}>+ Record transaction</Button>
+        <Can permission="finance.create"><Button onClick={() => { setFormError(null); setModalOpen(true); }}>+ Record transaction</Button></Can>
       </div>
 
       <div className="mb-6 flex gap-1 border-b border-hairline">

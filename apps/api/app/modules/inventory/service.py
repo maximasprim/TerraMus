@@ -146,8 +146,10 @@ async def valuation_report(db: AsyncSession, org_id: uuid.UUID) -> list[schemas.
         avg_unit_cost = (value / priced_qty).quantize(Decimal("0.0001")) if value is not None and priced_qty > 0 else None
         rows.append(schemas.ValuationRow(
             item_id=item.id, item_name=item.name, unit=item.unit,
-            quantity_on_hand=total_stock, priced_quantity=priced_qty,
-            avg_unit_cost=avg_unit_cost, total_value=value if value is not None else Decimal("0"),
+            quantity_on_hand=Decimal(total_stock).quantize(Decimal("0.01")),
+            priced_quantity=Decimal(priced_qty).quantize(Decimal("0.01")),
+            avg_unit_cost=avg_unit_cost,
+            total_value=Decimal(value if value is not None else 0).quantize(Decimal("0.01")),
         ))
     return rows
 

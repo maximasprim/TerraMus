@@ -11,6 +11,7 @@ import type { SearchResult } from "@/lib/types";
 const TYPE_LABELS: Record<string, string> = {
   animal: "Animal", customer: "Customer", order: "Order", invoice: "Invoice",
   supplier: "Supplier", inventory_item: "Inventory item", employee: "Employee", asset: "Asset",
+  crop_planting: "Crop planting",
 };
 
 /** Only types with an actual detail page get a link - search surfaces
@@ -20,6 +21,7 @@ const TYPE_LABELS: Record<string, string> = {
 function detailHref(result: SearchResult): string | null {
   switch (result.type) {
     case "animal": return `/admin/livestock/${result.id}`;
+    case "crop_planting": return `/admin/crops/${result.id}`;
     case "order": return `/admin/orders/${result.id}`;
     case "inventory_item": return `/admin/inventory/${result.id}`;
     case "employee": return `/admin/employees/${result.id}`;
@@ -42,7 +44,7 @@ export default function SearchPage() {
     <AdminShell>
       <div className="mb-6">
         <h1 className="font-display text-2xl text-forest">Search</h1>
-        <p className="text-sm text-muted">Animal IDs, ear tags, customers, orders, invoices, suppliers, inventory, staff, assets.</p>
+        <p className="text-sm text-muted">Animal IDs, ear tags, crop plantings, customers, orders, invoices, suppliers, inventory, staff, assets.</p>
       </div>
 
       <form

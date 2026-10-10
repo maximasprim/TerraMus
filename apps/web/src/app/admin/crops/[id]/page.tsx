@@ -4,6 +4,9 @@ import { useState } from "react";
 import { useParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AdminShell } from "@/components/admin-shell";
+import { Can } from "@/components/can";
+import { EditEntityModal } from "@/components/edit-entity-modal";
+import { useCan } from "@/lib/use-auth";
 import { Card, TagChip, StatusBadge, ErrorState, Button, Modal, Input, Select, Textarea } from "@/components/ui";
 import { apiFetch, ApiError } from "@/lib/api";
 import type { CropPlanting, CropEvent, HarvestRecord, CropPlantingProfitability } from "@/lib/types";
@@ -29,6 +32,8 @@ export default function CropPlantingDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [tab, setTab] = useState<Tab>("Overview");
   const queryClient = useQueryClient();
+  const [editOpen, setEditOpen] = useState(false);
+  const can = useCan();
 
   const plantingQuery = useQuery<CropPlanting>({
     queryKey: ["crop-planting", id],
@@ -95,11 +100,13 @@ export default function CropPlantingDetailPage() {
 
   return (
     <AdminShell>
+      <EditEntityModal entity="crops" id={id} record={p} open={editOpen} onClose={() => setEditOpen(false)} invalidate={[["crop-planting", id], ["crops"]]} />
       <div className="mb-6 flex items-start justify-between">
         <div>
           <div className="mb-2 flex items-center gap-3">
             <TagChip>{p.planting_number}</TagChip>
             <StatusBadge status={p.status} />
+            {can("crops.update") && <button type="button" onClick={() => setEditOpen(true)} className="rounded border border-hairline px-2 py-0.5 text-xs text-forest hover:bg-forest/5">Edit</button>}
           </div>
           <h1 className="font-display text-2xl text-forest capitalize">
             {p.crop_type.replace(/_/g, " ")}
@@ -118,7 +125,7 @@ export default function CropPlantingDetailPage() {
         )}
       </div>
 
-      {ALLOWED_TRANSITIONS[p.status]?.length > 0 && (
+      {can("crops.update") && ALLOWED_TRANSITIONS[p.status]?.length > 0 && (
         <div className="mb-6 flex flex-wrap items-center gap-2">
           <span className="text-xs uppercase tracking-wider text-muted">Change status:</span>
           {ALLOWED_TRANSITIONS[p.status].map((next) => (
@@ -211,9 +218,9 @@ export default function CropPlantingDetailPage() {
       {tab === "Harvests" && (
         <div>
           <div className="mb-4 flex justify-end">
-            <Button onClick={() => { setHarvestFormError(null); setHarvestModalOpen(true); }}>
+            <Can permission="crops.harvest"><Button onClick={() => { setHarvestFormError(null); setHarvestModalOpen(true); }}>
               + Record harvest
-            </Button>
+            </Button></Can>
           </div>
           <Card>
             {harvestsQuery.isLoading && <p className="text-sm text-muted">Loading…</p>}

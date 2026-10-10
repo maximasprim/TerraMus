@@ -230,3 +230,134 @@ async def test_payment_history_lists_past_payments(client, monkeypatch):
     payments = resp.json()
     assert len(payments) == 1
     assert payments[0]["provider_reference"] == "ws_CO_test_ref_1"
+
+
+async def _owner_and_limited_user(client, org: str, owner_email: str, worker_email: str):
+    reg = await client.post("/api/v1/auth/register", json={
+        "organization_name": org, "full_name": "Owner", "email": owner_email, "password": "supersecret123",
+    })
+    owner = {"Authorization": f"Bearer {reg.json()['access_token']}"}
+    await client.post("/api/v1/users", headers=owner, json={"full_name": "Worker", "email": worker_email, "password": "supersecret123"})
+    login = await client.post("/api/v1/auth/login", json={"email": worker_email, "password": "supersecret123"})
+    return owner, {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+
+async def test_users_without_admin_rights_cannot_start_subscriptions_or_see_payment_history(client):
+    owner, worker = await _owner_and_limited_user(client, "Bill Farm A", "bill1@example.com", "billworker@example.com")
+    body = {"tier_slug": "pro", "phone_number": "254712345678"}
+
+    assert (await client.post("/api/v1/billing/subscribe", json=body, headers=worker)).status_code == 403
+    assert (await client.get("/api/v1/billing/payments", headers=worker)).status_code == 403
+    assert (await client.get("/api/v1/billing/payments/00000000-0000-0000-0000-000000000000/receipt.pdf", headers=worker)).status_code == 403
+    # reading the current plan stays open - other screens depend on it
+    assert (await client.get("/api/v1/billing/subscription", headers=worker)).status_code == 200
+    # the owner is unaffected
+    assert (await client.get("/api/v1/billing/payments", headers=owner)).status_code == 200
+
+
+async def test_receipt_with_a_malformed_id_is_a_422_not_a_500(client):
+    owner, _ = await _owner_and_limited_user(client, "Bill Farm B", "bill2@example.com", "billworker2@example.com")
+    bad = await client.get("/api/v1/billing/payments/not-a-uuid/receipt.pdf", headers=owner)
+    assert bad.status_code == 422
+    missing = await client.get("/api/v1/billing/payments/00000000-0000-0000-0000-000000000000/receipt.pdf", headers=owner)
+    assert missing.status_code == 404
+
+
+# ---- crop planting plan limit ---------------------------------------------------------------------
+
+async def _farm_id(client, headers) -> str:
+    return (await client.post("/api/v1/farms", json={"name": "Crop Cap Farm", "county": "Nakuru"}, headers=headers)).json()["id"]
+
+
+async def _plant(client, headers, farm_id: str, number: str):
+    return await client.post("/api/v1/crops", headers=headers, json={
+        "farm_id": farm_id, "planting_number": number, "crop_type": "maize", "planting_date": "2026-01-01",
+    })
+
+
+async def _pin_tier_cap(org_slug_tier: str, cap):
+    """Seeds the default tiers and pins one tier's crop cap (the same technique the animal-limit test uses)."""
+    from app.core import database as db_module
+    from app.modules.billing.service import ensure_default_tiers
+    async with db_module.AsyncSessionLocal() as session:
+        tiers = await ensure_default_tiers(session)
+        tiers[org_slug_tier].max_crop_plantings = cap
+        await session.commit()
+
+
+async def test_default_tiers_carry_a_crop_planting_cap(client):
+    tiers = {t["slug"]: t for t in (await client.get("/api/v1/billing/tiers")).json()}
+    assert tiers["free"]["max_crop_plantings"] == 25 and tiers["enterprise"]["max_crop_plantings"] is None
+
+
+async def test_crop_planting_limit_is_enforced_through_the_api(client):
+    tenant = await _register_org(client, "Crop Cap A", "cropcap-a@example.com")
+    headers = {"Authorization": f"Bearer {tenant['access_token']}"}
+    await client.get("/api/v1/billing/subscription", headers=headers)   # lazily puts the org on the free tier
+    await _pin_tier_cap("free", 2)
+    farm = await _farm_id(client, headers)
+
+    assert (await _plant(client, headers, farm, "CAP-1")).status_code == 201
+    assert (await _plant(client, headers, farm, "CAP-2")).status_code == 201
+    blocked = await _plant(client, headers, farm, "CAP-3")
+    assert blocked.status_code == 402 and "crop plantings" in blocked.json()["detail"]
+
+
+async def test_closed_plantings_do_not_use_up_plan_capacity(client):
+    tenant = await _register_org(client, "Crop Cap B", "cropcap-b@example.com")
+    headers = {"Authorization": f"Bearer {tenant['access_token']}"}
+    await client.get("/api/v1/billing/subscription", headers=headers)
+    await _pin_tier_cap("free", 1)
+    farm = await _farm_id(client, headers)
+
+    first = await _plant(client, headers, farm, "CAP-B1")
+    assert first.status_code == 201
+    assert (await _plant(client, headers, farm, "CAP-B2")).status_code == 402
+    archived = await client.post(f"/api/v1/crops/{first.json()['id']}/status", headers=headers, json={"status": "failed"})
+    assert archived.status_code == 200, archived.text
+    assert (await _plant(client, headers, farm, "CAP-B2")).status_code == 201   # capacity freed
+
+
+async def test_unlimited_tiers_never_block_planting(client):
+    tenant = await _register_org(client, "Crop Cap C", "cropcap-c@example.com")
+    headers = {"Authorization": f"Bearer {tenant['access_token']}"}
+    await client.get("/api/v1/billing/subscription", headers=headers)
+    await _pin_tier_cap("free", None)
+    farm = await _farm_id(client, headers)
+    for i in range(3):
+        assert (await _plant(client, headers, farm, f"CAP-C{i}")).status_code == 201
+
+
+async def test_downgrade_blocked_when_over_new_tiers_crop_planting_limit(client, monkeypatch):
+    import app.modules.billing.service as billing_service
+    monkeypatch.setattr(billing_service, "get_provider", lambda name: FakeMpesaProvider())
+
+    tenant = await _register_org(client, "Crop Cap D", "cropcap-d@example.com")
+    headers = {"Authorization": f"Bearer {tenant['access_token']}"}
+    await client.get("/api/v1/billing/subscription", headers=headers)
+    farm = await _farm_id(client, headers)
+    for i in range(3):
+        assert (await _plant(client, headers, farm, f"CAP-D{i}")).status_code == 201
+
+    await _pin_tier_cap("basic", 2)   # org has 3 live plantings
+    resp = await client.post("/api/v1/billing/subscribe", json={"tier_slug": "basic", "phone_number": "254712345678"}, headers=headers)
+    assert resp.status_code == 400 and "crop plantings" in resp.json()["detail"]
+
+
+async def test_subscription_phone_is_normalised_for_daraja(client, monkeypatch):
+    import app.modules.billing.service as billing_service
+    seen = []
+
+    class Recorder(FakeMpesaProvider):
+        async def initiate_payment(self, amount, currency, reference, phone_or_token):
+            seen.append(phone_or_token)
+            return await super().initiate_payment(amount, currency, reference, phone_or_token)
+
+    monkeypatch.setattr(billing_service, "get_provider", lambda name: Recorder())
+    tenant = await _register_org(client, "Bill Phone A", "billphone@example.com")
+    headers = {"Authorization": f"Bearer {tenant['access_token']}"}
+
+    ok = await client.post("/api/v1/billing/subscribe", json={"tier_slug": "pro", "phone_number": "0712 345 678"}, headers=headers)
+    assert ok.status_code == 200 and seen == ["254712345678"]
+    bad = await client.post("/api/v1/billing/subscribe", json={"tier_slug": "pro", "phone_number": "nope"}, headers=headers)
+    assert bad.status_code == 422 and len(seen) == 1

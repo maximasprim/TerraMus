@@ -4,6 +4,8 @@ import { useState } from "react";
 import { useParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AdminShell } from "@/components/admin-shell";
+import { EditEntityModal } from "@/components/edit-entity-modal";
+import { useCan } from "@/lib/use-auth";
 import { Card, StatusBadge, ErrorState, Button, Input } from "@/components/ui";
 import { apiFetch, ApiError } from "@/lib/api";
 import type { EmployeeDetail, WorkShift } from "@/lib/types";
@@ -18,6 +20,8 @@ const STATUS_TRANSITIONS: Record<string, string[]> = {
 export default function EmployeeDetailPage() {
   const { id } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
+  const [editOpen, setEditOpen] = useState(false);
+  const can = useCan();
   const [statusError, setStatusError] = useState<string | null>(null);
   const [shiftDate, setShiftDate] = useState("");
   const [startTime, setStartTime] = useState("");
@@ -84,9 +88,10 @@ export default function EmployeeDetailPage() {
 
   return (
     <AdminShell>
+      <EditEntityModal entity="employees" id={id} record={employee} open={editOpen} onClose={() => setEditOpen(false)} invalidate={[["employee", id], ["employees"]]} />
       <div className="mb-6 flex items-start justify-between">
         <div>
-          <div className="mb-2"><StatusBadge status={employee.employment_status} /></div>
+          <div className="mb-2 flex items-center gap-3"><StatusBadge status={employee.employment_status} />{can("employees.manage") && <button type="button" onClick={() => setEditOpen(true)} className="rounded border border-hairline px-2 py-0.5 text-xs text-forest hover:bg-forest/5">Edit</button>}</div>
           <h1 className="font-display text-2xl text-forest">{employee.full_name}</h1>
           <p className="text-sm text-muted">
             {employee.employee_number} · {employee.job_title ?? "No title"} · {employee.department ?? "No department"}

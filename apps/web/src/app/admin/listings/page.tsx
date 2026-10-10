@@ -3,9 +3,10 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AdminShell } from "@/components/admin-shell";
+import { Can } from "@/components/can";
 import { Card, Button, Input, Select, Textarea, Modal, ErrorState, EmptyState, TagChip } from "@/components/ui";
 import { ListingPhotos } from "@/components/listing-photos";
-import { apiFetch, ApiError } from "@/lib/api";
+import { ApiError, apiFetch, apiFetchAll } from "@/lib/api";
 import { listingImageUrl } from "@/lib/shop-utils";
 import type { Listing, Animal, CropPlanting } from "@/lib/types";
 
@@ -31,7 +32,7 @@ export default function ListingsPage() {
   // Only for_sale animals are eligible for a new listing (backend requirement).
   const forSaleAnimalsQuery = useQuery<Animal[]>({
     queryKey: ["livestock", "for_sale"],
-    queryFn: () => apiFetch<Animal[]>("/api/v1/livestock?status=for_sale&page_size=100"),
+    queryFn: () => apiFetchAll<Animal>("/api/v1/livestock?status=for_sale"),
     enabled: modalOpen,
   });
   // Any planting can be a listing candidate - the backend itself checks for
@@ -40,7 +41,7 @@ export default function ListingsPage() {
   // by status here.
   const plantingsQuery = useQuery<CropPlanting[]>({
     queryKey: ["crops"],
-    queryFn: () => apiFetch<CropPlanting[]>("/api/v1/crops?page_size=100"),
+    queryFn: () => apiFetchAll<CropPlanting>("/api/v1/crops"),
     enabled: modalOpen,
   });
 
@@ -89,7 +90,7 @@ export default function ListingsPage() {
             Active public listings - what's currently visible to shoppers and guest checkout.
           </p>
         </div>
-        <Button onClick={() => { setError(null); setModalOpen(true); }}>+ New listing</Button>
+        <Can permission="listings.manage"><Button onClick={() => { setError(null); setModalOpen(true); }}>+ New listing</Button></Can>
       </div>
 
       {listingsQuery.error && (
@@ -132,7 +133,7 @@ export default function ListingsPage() {
                 </span>
               )}
               <TagChip>{listing.slug}</TagChip>
-              <div className="mt-2 flex gap-2">
+              <Can permission="listings.manage"><div className="mt-2 flex gap-2">
                 <Button
                   variant="ghost"
                   className="text-xs"
@@ -151,7 +152,7 @@ export default function ListingsPage() {
                 >
                   Deactivate
                 </Button>
-              </div>
+              </div></Can>
             </Card>
           ))}
         </div>

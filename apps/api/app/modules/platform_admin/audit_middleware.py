@@ -9,12 +9,18 @@ middleware does it once, structurally, for every current and future write
 endpoint under /api/v1/platform/organizations/{org_id}/... without the
 endpoint author needing to remember anything.
 
-Three endpoints keep their own hand-written record_admin_action() calls
-instead (org suspend/reactivate in router.py, livestock create/update) -
-they were built before this middleware existed and capture richer detail
-(previous_value/new_value diffs) than this generic version does. This
-middleware explicitly skips those three paths (see SKIP_PATTERNS below) to
-avoid double-logging the same action twice.
+A handful of endpoints keep their own hand-written audit calls instead -
+org suspend/reactivate (logged in service.set_organization_status) and
+livestock + crop-planting create / update / change-status (router.py) - because
+they capture richer detail (previous_value/new_value diffs) than this generic
+version does. `is_self_audited` below recognises exactly those routes by
+method + path so they aren't logged twice.
+
+IMPORTANT: this must stay an exact allow-list of self-audited routes. It used
+to skip any path ENDING in "/status" and any livestock POST, which silently
+exempted purchase-order, employee and order status changes and the livestock
+health / lactation / dry-off / milk-record writes from auditing altogether,
+while crop create/update/status (also self-audited) were logged twice.
 """
 import re
 import uuid
@@ -30,17 +36,24 @@ _ORG_PATH_RE = re.compile(
     r"^/api/v1/platform/organizations/(?P<org_id>[0-9a-fA-F-]{36})(?:/(?P<entity_type>[a-zA-Z0-9_-]+))?"
 )
 
-# Paths with their own richer, hand-written audit call - see module
-# docstring. Matched by suffix since org_id varies.
-_SKIP_SUFFIXES = (
-    "/status",  # organizations/{id}/status (suspend/reactivate) - router.py logs this itself
+_ID = r"[0-9a-fA-F-]{36}"
+
+# Routes that write their own, richer audit row (see module docstring). Each
+# entry is (HTTP method, regex for the path AFTER /organizations/{org_id}).
+_SELF_AUDITED = (
+    ("PATCH", re.compile(r"^/status$")),                                   # org suspend / reactivate
+    ("POST", re.compile(rf"^/livestock(?:/{_ID}/status)?$")),              # create animal, change animal status
+    ("PATCH", re.compile(rf"^/livestock/{_ID}$")),                         # update animal
+    ("POST", re.compile(rf"^/crops(?:/{_ID}/status)?$")),                  # create planting, change planting status
+    ("PATCH", re.compile(rf"^/crops/{_ID}$")),                             # update planting
 )
-_SKIP_EXACT_ENTITY_TYPES_WITH_METHOD = {
-    # (entity_type, method): the livestock create/update handlers in
-    # router.py already call record_admin_action themselves.
-    ("livestock", "POST"),
-    ("livestock", "PATCH"),
-}
+
+
+def is_self_audited(method: str, path_after_org: str) -> bool:
+    """True only for the exact routes that already audit themselves."""
+    path = path_after_org.rstrip("/")
+    return any(m == method and rx.match(path) for m, rx in _SELF_AUDITED)
+
 
 _WRITE_METHODS = ("POST", "PATCH", "PUT", "DELETE")
 
@@ -71,9 +84,7 @@ class PlatformAuditMiddleware(BaseHTTPMiddleware):
         org_id = match.group("org_id")
         entity_type = match.group("entity_type") or "organization"
 
-        if request.url.path.endswith(_SKIP_SUFFIXES):
-            return response
-        if (entity_type, request.method) in _SKIP_EXACT_ENTITY_TYPES_WITH_METHOD:
+        if is_self_audited(request.method, request.url.path[match.end("org_id"):]):
             return response
 
         await self._write_audit_row(org_id, admin_id, entity_type, request.method, request.url.path)

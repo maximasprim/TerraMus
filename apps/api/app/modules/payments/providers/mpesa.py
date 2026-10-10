@@ -17,6 +17,7 @@ from typing import Any
 import httpx
 
 from app.core.config import get_settings
+from app.core.security_checks import is_production_like
 from app.modules.payments.providers.base import PaymentProvider, InitiateResult, WebhookResult
 
 settings = get_settings()
@@ -85,6 +86,11 @@ class MpesaDarajaProvider(PaymentProvider):
         # optional shared-secret header for deployments that add one via a
         # reverse proxy in front of the callback endpoint.
         expected = getattr(settings, "DARAJA_CALLBACK_SHARED_SECRET", None)
+        if not expected and is_production_like(settings.ENV):
+            # Without a secret ANYONE could POST a "successful" callback for a
+            # CheckoutRequestID (which the public pay endpoint returns to the
+            # buyer) and mark their own order paid. Refuse rather than trust.
+            raise ValueError("M-Pesa callback secret is not configured")
         if expected:
             provided = headers.get("x-callback-secret", "")
             if not hmac.compare_digest(provided, expected):

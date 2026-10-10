@@ -11,6 +11,7 @@ class SubscriptionTierOut(BaseModel):
     monthly_price_kes: float
     max_users: int | None
     max_animals: int | None
+    max_crop_plantings: int | None = None
 
     class Config:
         from_attributes = True

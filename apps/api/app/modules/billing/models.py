@@ -22,6 +22,7 @@ class SubscriptionTier(Base, UUIDPKMixin, TimestampMixin):
     monthly_price_kes: Mapped[float] = mapped_column(Numeric(12, 2))
     max_users: Mapped[int | None] = mapped_column(Integer, nullable=True)  # None = unlimited
     max_animals: Mapped[int | None] = mapped_column(Integer, nullable=True)  # None = unlimited
+    max_crop_plantings: Mapped[int | None] = mapped_column(Integer, nullable=True)  # None = unlimited
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)  # False = no longer offered to new subscribers
 
 
