@@ -32,3 +32,17 @@
     outline-offset: 2px;
   }
 }
+
+/* Printing a report page ("Print / save as PDF"). Scoped with :has() to pages that opt in via the
+   .printable-report class, so printing any other page (invoices, etc.) is untouched. */
+@media print {
+  body:has(.printable-report) aside,
+  body:has(.printable-report) .no-print { display: none !important; }
+  /* The on-screen shell is exactly one viewport tall with an inner scroller; for paper, let it grow. */
+  body:has(.printable-report) .shell-root,
+  body:has(.printable-report) .shell-body { display: block !important; height: auto !important; overflow: visible !important; }
+  body:has(.printable-report) .shell-root { position: static !important; inset: auto !important; }
+  body:has(.printable-report) main { overflow: visible !important; padding: 0 !important; }
+  body:has(.printable-report) { background: #fff; }
+  .printable-report .avoid-break { break-inside: avoid; }
+}

@@ -1,7 +1,7 @@
 import csv
 import io
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,7 +10,7 @@ from app.core.database import get_db
 from app.modules.identity.deps import require_permission
 from app.modules.identity.models import User
 from app.modules.livestock.models import Animal
-from app.modules.reporting import schemas, service
+from app.modules.reporting import analytics, analytics_schemas, schemas, service
 
 router = APIRouter(prefix="/api/v1/reports", tags=["reporting"])
 
@@ -21,6 +21,17 @@ async def dashboard(
     db: AsyncSession = Depends(get_db),
 ):
     return await service.dashboard_summary(db, user.organization_id)
+
+
+@router.get("/analytics", response_model=analytics_schemas.AnalyticsReport)
+async def analytics_report(
+    months: int = Query(6, ge=1, le=24, description="How many calendar months to chart, ending with the current one"),
+    user: User = Depends(require_permission("reports.view")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Chart-ready aggregates (finance, sales, herd, dairy, crops, inventory, health)
+    for the dashboard and the reports page. Read-only; scoped to the caller's org."""
+    return await analytics.analytics_report(db, user.organization_id, months)
 
 
 @router.get("/profitability", response_model=schemas.ProfitabilityReport)

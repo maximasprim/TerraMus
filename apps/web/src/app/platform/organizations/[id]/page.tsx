@@ -9,7 +9,14 @@ import { Card, Button, ErrorState } from "@/components/ui";
 import { platformApiFetch, PlatformApiError } from "@/lib/platform-api";
 import { usePlatformMe } from "@/lib/use-platform-auth";
 import { PLATFORM_MODULES } from "@/lib/platform-modules";
-import type { OrganizationSummaryOut } from "@/lib/platform-types";
+import type { OrganizationSummaryOut, TenantCatalogSettings } from "@/lib/platform-types";
+
+/** "Livestock: 3 species" / "Livestock: all species" / "Livestock: off". */
+function catalogSummary(module: string, enabled: boolean, list: string[] | null, noun: string): string {
+  if (!enabled) return `${module}: off`;
+  if (list === null) return `${module}: all ${noun}`;
+  return `${module}: ${list.length} ${noun}`;
+}
 
 export default function OrganizationDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -21,6 +28,12 @@ export default function OrganizationDetailPage() {
   const orgQuery = useQuery<OrganizationSummaryOut>({
     queryKey: ["platform-organization", id],
     queryFn: () => platformApiFetch<OrganizationSummaryOut>(`/api/v1/platform/organizations/${id}`),
+  });
+
+  // Shares its cache key with the catalog page, so opening that page afterwards is instant.
+  const catalogQuery = useQuery<TenantCatalogSettings>({
+    queryKey: ["platform-catalog-settings", id],
+    queryFn: () => platformApiFetch<TenantCatalogSettings>(`/api/v1/platform/organizations/${id}/catalog-settings`),
   });
 
   const toggleSuspend = useMutation({
@@ -94,6 +107,21 @@ export default function OrganizationDetailPage() {
           <p className="font-display text-2xl text-forest capitalize">{org.subscription_status ?? "-"}</p>
         </Card>
       </div>
+
+      <Link
+        href={`/platform/organizations/${org.id}/catalog`}
+        className="mt-4 flex items-center justify-between gap-4 rounded-lg border border-hairline bg-white/60 p-6 transition-colors hover:bg-white"
+      >
+        <div>
+          <p className="font-display text-lg text-forest">Products &amp; catalog</p>
+          <p className="text-sm text-muted">
+            {catalogQuery.data
+              ? `${catalogSummary("Livestock", catalogQuery.data.livestock_enabled, catalogQuery.data.enabled_species, "species")} · ${catalogSummary("Crops", catalogQuery.data.crops_enabled, catalogQuery.data.enabled_crop_types, "crop types")}`
+              : "Choose which livestock species and crop types this organization can deal in."}
+          </p>
+        </div>
+        <span className="shrink-0 text-sm text-forest">{canWrite ? "Manage" : "View"} →</span>
+      </Link>
 
       <p className="mt-6 text-xs text-muted">
         Created {new Date(org.created_at).toLocaleDateString()}.

@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.middleware import rate_limit_auth
-from app.modules.platform_admin import schemas, service
+from app.modules.platform_admin import analytics as platform_analytics_service, analytics_schemas, schemas, service
 from app.modules.platform_admin.deps import get_current_platform_admin, require_write_access
 from app.modules.platform_admin.models import PlatformAdmin
 
@@ -169,6 +169,17 @@ async def dashboard(
     db: AsyncSession = Depends(get_db),
 ):
     return await service.dashboard_stats(db)
+
+
+@router.get("/analytics", response_model=analytics_schemas.PlatformAnalytics)
+async def analytics(
+    months: int = Query(12, ge=1, le=36, description="Calendar months to chart, ending with the current one"),
+    admin: PlatformAdmin = Depends(require_write_access),  # GET-only: viewer admins may read
+    db: AsyncSession = Depends(get_db),
+):
+    """Platform-wide charts: signups, plans and MRR, money collected, tenant sales
+    volume, usage and the top tenants. Read-only."""
+    return await platform_analytics_service.platform_analytics(db, months)
 
 
 # --- platform admin account management --------------------------------------

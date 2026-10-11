@@ -2,15 +2,17 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { createContext, useContext, useEffect } from "react";
 import { clsx } from "clsx";
-import { LayoutDashboard, Beef, Sprout, LogOut, MapPin, Users, ShoppingCart, Tag, Package, Wallet, Truck, UserCog, Wrench, Search, Settings, UsersRound, CalendarClock, Bell, Newspaper, CreditCard, ExternalLink, Inbox, History } from "lucide-react";
+import { LayoutDashboard, BarChart3, Beef, Sprout, LogOut, MapPin, Users, ShoppingCart, Tag, Package, Wallet, Truck, UserCog, Wrench, Search, Settings, UsersRound, CalendarClock, Bell, Newspaper, CreditCard, ExternalLink, Inbox, History } from "lucide-react";
 import { useRequireAuth, useLogout } from "@/lib/use-auth";
 import { canAccessPath, firstAccessiblePath } from "@/lib/permissions";
 import { useCatalog } from "@/lib/use-catalog";
+import { ShellFrame } from "@/components/shell-frame";
 
 const NAV = [
   { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/admin/reports", label: "Reports", icon: BarChart3 },
   { href: "/admin/livestock", label: "Livestock", icon: Beef },
   { href: "/admin/crops", label: "Crops", icon: Sprout },
   { href: "/admin/listings", label: "Listings", icon: Tag },
@@ -33,7 +35,10 @@ const NAV = [
   { href: "/admin/settings", label: "Settings", icon: Settings },
 ];
 
-export function AdminShell({ children }: { children: React.ReactNode }) {
+/** True inside app/admin/layout.tsx, which renders the shell once for every admin page. */
+const ShellProvided = createContext(false);
+
+function AdminShellFrame({ children }: { children: React.ReactNode }) {
   const { me, ready } = useRequireAuth();
   const logout = useLogout();
   // Modules a platform admin has switched off for this organization are left out of the
@@ -64,9 +69,12 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="flex min-h-screen bg-paper">
-      <aside className="flex w-60 flex-col border-r border-hairline bg-forest text-paper">
-     <div className="border-b border-white/10 px-6 py-5">
+    <ShellFrame
+      sidebarClassName="bg-forest"
+      mobileTitle={me?.organization.name}
+      mainClassName="p-4 sm:p-6 lg:p-8"
+      brand={
+        <div className="border-b border-white/10 px-6 py-5">
           <p className="font-display text-lg italic text-center leading-tight">{me?.organization.name}</p>
           <p className="text-xs text-paper/60 leading-tight">{me?.user.full_name}</p>
           {me?.organization.slug && (
@@ -81,46 +89,64 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             </a>
           )}
         </div>
-        <nav className="flex-1 space-y-1 px-3 py-4">
-          {NAV.filter(({ href }) => canAccessPath(permissions, href) && !moduleOff(href)).map(({ href, label, icon: Icon }) => (
-            <Link
-              key={href}
-              href={href}
-              className={clsx(
-                "flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors",
-                pathname.startsWith(href) ? "bg-white/10 font-medium" : "text-paper/70 hover:bg-white/5",
-              )}
-            >
-              <Icon size={16} />
-              {label}
-            </Link>
-          ))}
-        </nav>
+      }
+      nav={NAV.filter(({ href }) => canAccessPath(permissions, href) && !moduleOff(href)).map(({ href, label, icon: Icon }) => (
+        <Link
+          key={href}
+          href={href}
+          className={clsx(
+            "flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors",
+            pathname.startsWith(href) ? "bg-white/10 font-medium" : "text-paper/70 hover:bg-white/5",
+          )}
+        >
+          <Icon size={16} />
+          {label}
+        </Link>
+      ))}
+      footer={
         <button
           onClick={logout}
-          className="flex items-center gap-2 border-t border-white/10 px-6 py-4 text-sm text-paper/70 hover:text-paper"
+          className="flex w-full items-center gap-2 border-t border-white/10 px-6 py-4 text-sm text-paper/70 hover:text-paper"
         >
           <LogOut size={16} />
           Sign out
         </button>
-      </aside>
-      <main className="flex-1 overflow-y-auto p-8">
-        {allowed ? (
-          children
-        ) : sendToLanding ? (
-          <p className="text-sm text-muted">Taking you to your workspace…</p>
-        ) : (
-          <div className="mx-auto mt-16 max-w-md rounded-lg border border-hairline bg-white p-8 text-center">
-            <h1 className="font-display text-xl text-forest">You don&apos;t have access to this page</h1>
-            <p className="mt-2 text-sm text-muted">
-              Your role doesn&apos;t include this area. If you need it, ask the farm owner to update your role under Team.
-            </p>
-            <Link href={firstAccessiblePath(permissions)} className="mt-5 inline-block rounded-md bg-forest px-5 py-2.5 text-sm font-medium text-paper hover:bg-forest/90">
-              Go to my workspace
-            </Link>
-          </div>
-        )}
-      </main>
-    </div>
+      }
+    >
+      {allowed ? (
+        children
+      ) : sendToLanding ? (
+        <p className="text-sm text-muted">Taking you to your workspace…</p>
+      ) : (
+        <div className="mx-auto mt-16 max-w-md rounded-lg border border-hairline bg-white p-8 text-center">
+          <h1 className="font-display text-xl text-forest">You don&apos;t have access to this page</h1>
+          <p className="mt-2 text-sm text-muted">
+            Your role doesn&apos;t include this area. If you need it, ask the farm owner to update your role under Team.
+          </p>
+          <Link href={firstAccessiblePath(permissions)} className="mt-5 inline-block rounded-md bg-forest px-5 py-2.5 text-sm font-medium text-paper hover:bg-forest/90">
+            Go to my workspace
+          </Link>
+        </div>
+      )}
+    </ShellFrame>
+  );
+}
+
+/**
+ * What every admin page wraps itself in. Inside app/admin/layout.tsx the shell already exists and
+ * persists across navigation, so this just renders the page; used on its own (e.g. in a test or a
+ * page outside that layout) it renders the full shell exactly as before.
+ */
+export function AdminShell({ children }: { children: React.ReactNode }) {
+  const provided = useContext(ShellProvided);
+  return provided ? <>{children}</> : <AdminShellFrame>{children}</AdminShellFrame>;
+}
+
+/** Rendered once by app/admin/layout.tsx so the sidebar is never rebuilt when moving between pages. */
+export function AdminShellLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <ShellProvided.Provider value={true}>
+      <AdminShellFrame>{children}</AdminShellFrame>
+    </ShellProvided.Provider>
   );
 }

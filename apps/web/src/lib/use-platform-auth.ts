@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { platformApiFetch, clearPlatformToken, getPlatformToken, setPlatformToken } from "@/lib/platform-api";
@@ -22,7 +22,6 @@ export function usePlatformMe() {
 export function useRequirePlatformAuth() {
   const router = useRouter();
   const meQuery = usePlatformMe();
-  const [checked, setChecked] = useState(false);
 
   useEffect(() => {
     if (!getPlatformToken()) {
@@ -34,10 +33,12 @@ export function useRequirePlatformAuth() {
       router.replace("/platform/login");
       return;
     }
-    if (meQuery.data) setChecked(true);
   }, [meQuery.isError, meQuery.data, router]);
 
-  return { me: meQuery.data, ready: checked && !meQuery.isLoading };
+  // `ready` is simply "the session is known". It used to be a per-mount flag that started false, so
+  // every page that mounted a fresh shell flashed a full-screen "Loading..." even though the session
+  // was already cached. Deriving it from the data removes that flash.
+  return { me: meQuery.data, ready: !!meQuery.data };
 }
 
 export function usePlatformLogin() {

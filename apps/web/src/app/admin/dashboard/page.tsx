@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { AdminShell } from "@/components/admin-shell";
+import { TenantInsights } from "@/components/analytics/tenant-insights";
 import { StatCard, ErrorState } from "@/components/ui";
 import { apiFetch } from "@/lib/api";
 import { ApiError } from "@/lib/api";
@@ -18,9 +19,14 @@ export default function DashboardPage() {
     <AdminShell>
       <div className="mb-1 flex items-center justify-between">
         <h1 className="font-display text-2xl text-forest">Farm overview</h1>
-        <Link href="/admin/reports/profitability" className="text-sm text-forest hover:underline">
-          Profitability report →
-        </Link>
+        <div className="flex gap-4">
+          <Link href="/admin/reports" className="text-sm text-forest hover:underline">
+            All reports →
+          </Link>
+          <Link href="/admin/reports/profitability" className="text-sm text-forest hover:underline">
+            Profitability report →
+          </Link>
+        </div>
       </div>
       <p className="mb-6 text-sm text-muted">
         Everything you need to know about the farm, at a glance.
@@ -73,6 +79,8 @@ export default function DashboardPage() {
           </div>
         </>
       )}
+
+      <TenantInsights />
     </AdminShell>
   );
 }

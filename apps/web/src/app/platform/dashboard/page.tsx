@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { PlatformShell } from "@/components/platform-shell";
+import { PlatformInsights } from "@/components/analytics/platform-insights";
 import { StatCard, ErrorState, Card } from "@/components/ui";
 import { platformApiFetch, PlatformApiError } from "@/lib/platform-api";
 import type { PlatformDashboardStats } from "@/lib/platform-types";
@@ -47,6 +48,8 @@ export default function PlatformDashboardPage() {
           </Card>
         </>
       )}
+
+      <PlatformInsights />
     </PlatformShell>
   );
 }
