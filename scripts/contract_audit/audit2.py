@@ -23,6 +23,10 @@ for p in sorted(APP.rglob("*.py")):
         tgt = None; val = None
         if isinstance(n, ast.Assign) and len(n.targets) == 1 and isinstance(n.targets[0], ast.Name): tgt, val = n.targets[0].id, n.value
         elif isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name) and n.value is not None: tgt, val = n.target.id, n.value
+        if tgt and isinstance(val, ast.Constant) and isinstance(val.value, str):
+            # a named regex constant such as EMPLOYMENT_TYPE_PATTERN = r"^(full_time|part_time)$" used by Field(pattern=...)
+            mm = re.fullmatch(r"\^?\(?([\w|\-]+)\)?\$?", val.value)
+            if mm and "|" in mm.group(1): be_sets.append((f"{rel}:{tgt} (pattern constant)", set(mm.group(1).split("|"))))
         if tgt and val is not None:
             v = val
             if isinstance(v, ast.Call) and getattr(v.func, "id", "") in ("frozenset", "set", "tuple", "list") and v.args: v = v.args[0]
@@ -114,8 +118,7 @@ for m in mods:
                 if not ff["required"]: issues.append(("MED", slug, f"create: `{f['name']}` is required by the backend but the form doesn't mark it required"))
         for ff in m["fields"]:
             if ff["options"] and ff["name"] in names:
-                bf = next(x for x in bc["fields"] if x["name"] == ff["name"])
-                pass
+                pass   # dropdown VALUES are checked exactly, per module, in section F below
     ur = chk("edit", m["itemPath"], "PATCH")
     if ur and ur["body"] and m["fields"]:
         names = {f["name"] for f in cls(ur["body"])["fields"]}
@@ -144,6 +147,33 @@ if not issues: print("  no mismatches")
 print(f"\nplatform modules checked: {len(mods)} | issues: {len(issues)}")
 _b_failed = any(s == "HIGH" for s, _, _ in issues)
 
+
+
+# ---------------- F) platform form dropdowns vs the backend's own lists (exact, module-scoped)
+# The loose check in B only looks at lists of 3+ values and guesses the closest vocabulary anywhere in the app,
+# so a 2-value list (species, customer type) or a mis-guessed one (asset type, inventory category) slipped through.
+# Here each dropdown is compared with the vocabulary defined in the SAME module's backend code, exactly.
+print("\n######## F) platform form dropdowns vs backend vocabularies (exact) ########")
+MODDIR = {"livestock": "livestock", "crops": "crops", "assets": "assets", "employees": "employees",
+          "customers": "customers", "inventory": "inventory", "suppliers": "procurement"}
+f_issues = []; f_checked = 0
+for m in mods:
+    d = MODDIR.get(m["slug"])
+    for f in (m["fields"] or []) + (m["editExtra"] or []):
+        if not f["options"]: continue
+        f_checked += 1
+        fe = set(f["options"])
+        cands = [(lbl, bs) for lbl, bs in be_sets if d and f"modules/{d}/" in lbl and fe & bs]
+        if not cands:
+            f_issues.append(("HIGH", m["slug"], f"`{f['name']}`: no backend vocabulary in modules/{d}/ shares any of its values {sorted(fe)} - cannot verify this dropdown"))
+            continue
+        lbl, bs = max(cands, key=lambda c: len(fe & c[1]) / len(fe | c[1]))
+        if fe != bs:
+            sev = "HIGH" if fe - bs else "MED"
+            f_issues.append((sev, m["slug"], f"`{f['name']}` vs `{lbl}`: offered but REJECTED by the API {sorted(fe - bs)} | valid but NOT offered {sorted(bs - fe)}"))
+for sev, slug, msg in sorted(f_issues, key=lambda t: (order[t[0]], t[1])): print(f"  [{sev}] {slug:14} {msg}")
+print(f"  dropdowns checked: {f_checked} | issues: {len(f_issues)}")
+if any(s == "HIGH" for s, _, _ in f_issues): _b_failed = True
 
 # ---------------- C) frontend permission map (lib/permissions.ts) vs backend
 print("\n######## C) admin permission map vs backend ########")
@@ -216,5 +246,28 @@ for code, files in sorted(codes_used.items()):
 for sev, who, msg in sorted(e_issues): print(f"  [{sev}] {who:14} {msg}")
 print(f"  edit forms checked: {len(edit_cfg)} ({sum(len(c['fields']) for c in edit_cfg.values())} fields) | can() codes checked: {len(codes_used)} | issues: {len(e_issues)}")
 if any(s == "HIGH" for s, _, _ in e_issues): _b_failed = True
+
+
+# ---------------- G) every tenant edit form has a superadmin counterpart that mirrors it
+# platform-modules.ts offers a module's Edit form = the tenant's edit fields (via editEntity) + platform-only extras.
+# A tenant edit form with no linked platform module means superadmins silently lack fields tenants have.
+print("\n######## G) superadmin edit forms mirror the tenant edit forms ########")
+_pm_text = (REPO / "apps" / "web" / "src" / "lib" / "platform-modules.ts").read_text(encoding="utf-8")
+def _module_block(slug):
+    start = _pm_text.index(f'slug: "{slug}"')
+    nxt = _pm_text.find('\n    slug: "', start + 1)
+    return _pm_text[start: nxt if nxt != -1 else len(_pm_text)]
+
+PLATFORM_SLUG = {"livestock": "livestock", "crops": "crops", "assets": "assets", "employees": "employees", "suppliers": "suppliers"}
+g_issues = []
+for entity in edit_cfg:
+    slug = PLATFORM_SLUG.get(entity, entity)
+    if not re.search(rf'slug: "{slug}"', _pm_text):
+        g_issues.append(("HIGH", entity, f"the tenant can edit `{entity}` but the platform console has no `{slug}` module - map it in PLATFORM_SLUG or add the module"))
+    elif f'editEntity: "{entity}"' not in _module_block(slug):
+        g_issues.append(("HIGH", entity, f"platform module `{slug}` isn't linked to the tenant edit form (add `editEntity: \"{entity}\"`) - superadmins would be missing fields tenants can edit"))
+for sev, who, msg in g_issues: print(f"  [{sev}] {who:14} {msg}")
+print(f"  tenant edit forms checked: {len(edit_cfg)} | issues: {len(g_issues)}")
+if any(s == "HIGH" for s, _, _ in g_issues): _b_failed = True
 
 if _b_failed or any(s == "HIGH" for s, _, _ in perm_issues): sys.exit(1)

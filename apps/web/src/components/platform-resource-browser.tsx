@@ -4,7 +4,8 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button, Input, Select, Textarea, Modal, ErrorState, EmptyState, StatusBadge } from "@/components/ui";
 import { platformApiFetch, PlatformApiError } from "@/lib/platform-api";
-import type { ModuleConfig, ModuleField } from "@/lib/platform-modules";
+import { editFieldsFor, singularLabel, type ModuleConfig, type ModuleField } from "@/lib/platform-modules";
+import { buildPatch, toFormValues, type EditField } from "@/lib/edit-configs";
 
 function formatCell(value: unknown, format?: string): React.ReactNode {
   if (value === null || value === undefined || value === "") return <span className="text-muted">-</span>;
@@ -36,13 +37,6 @@ export function PlatformResourceBrowser({ orgId, config, canWrite }: { orgId: st
       platformApiFetch(config.createPath!(orgId), { method: "POST", body: JSON.stringify(body) }),
     onSuccess: () => { invalidate(); setCreateOpen(false); setFormError(null); },
     onError: (err) => setFormError(err instanceof PlatformApiError ? err.message : "Failed to create"),
-  });
-
-  const update = useMutation({
-    mutationFn: ({ id, body }: { id: string; body: Record<string, unknown> }) =>
-      platformApiFetch(config.itemPath!(orgId, id), { method: "PATCH", body: JSON.stringify(body) }),
-    onSuccess: () => { invalidate(); setEditingRow(null); setFormError(null); },
-    onError: (err) => setFormError(err instanceof PlatformApiError ? err.message : "Failed to save"),
   });
 
   const changeStatus = useMutation({
@@ -132,20 +126,11 @@ export function PlatformResourceBrowser({ orgId, config, canWrite }: { orgId: st
       )}
 
       {config.fields && (
-        <Modal open={createOpen} onClose={() => setCreateOpen(false)} title={`Create ${config.label.slice(0, -1) || config.label}`}>
+        <Modal open={createOpen} onClose={() => setCreateOpen(false)} title={`Create ${singularLabel(config)}`}>
           <GenericForm orgId={orgId} fields={config.fields} error={formError} pending={create.isPending} onSubmit={(body) => create.mutate(body)} />
         </Modal>
       )}
-      {config.fields && config.itemPath && (
-        <Modal open={!!editingRow} onClose={() => setEditingRow(null)} title={`Edit ${config.label.slice(0, -1) || config.label}`}>
-          {editingRow && (
-            <GenericForm
-              orgId={orgId} fields={[...config.fields.filter((f) => !f.createOnly), ...(config.editExtraFields ?? [])]} error={formError} pending={update.isPending} initial={editingRow}
-              onSubmit={(body) => update.mutate({ id: String(editingRow.id), body })}
-            />
-          )}
-        </Modal>
-      )}
+      <PlatformEditModal orgId={orgId} config={config} record={editingRow} onClose={() => setEditingRow(null)} onSaved={invalidate} />
       {config.statusAction && (
         <Modal open={!!statusRow} onClose={() => setStatusRow(null)} title={config.statusAction.label}>
           {statusRow && (
@@ -162,13 +147,72 @@ export function PlatformResourceBrowser({ orgId, config, canWrite }: { orgId: st
   );
 }
 
-/** Builds a plain form from a field list - text/number/date/boolean/select/
- * textarea inputs, no per-module hand-written form code. Relational fields
- * (farm_id, supplier_id, etc.) render as plain text inputs for the admin to
- * paste a UUID into - see platform-modules.ts's module docstring for why
- * that's an intentional simplification here rather than a proper picker. */
+/**
+ * The superadmin's Edit modal for ONE record. Used by the module list and by detail pages (e.g. the animal page), so
+ * every place offers exactly the same form - the tenant's edit fields plus the platform extras - and saves the same way.
+ * Pass `record={null}` to keep it closed. Renders nothing for modules that can't be edited.
+ */
+export function PlatformEditModal({
+  orgId, config, record, onClose, onSaved,
+}: {
+  orgId: string;
+  config: ModuleConfig;
+  record: Record<string, unknown> | null;
+  onClose: () => void;
+  /** Called after a successful save, before the modal closes - refresh whatever is showing this record. */
+  onSaved?: () => void;
+}) {
+  if (!config.fields || !config.itemPath) return null;
+  return (
+    <Modal open={!!record} onClose={onClose} title={`Edit ${singularLabel(config)}`}>
+      {/* the body mounts fresh on every open, so a previous error or half-typed value never leaks into the next edit */}
+      {record && <PlatformEditBody orgId={orgId} config={config} record={record} onClose={onClose} onSaved={onSaved} />}
+    </Modal>
+  );
+}
+
+function PlatformEditBody({
+  orgId, config, record, onClose, onSaved,
+}: { orgId: string; config: ModuleConfig; record: Record<string, unknown>; onClose: () => void; onSaved?: () => void }) {
+  const [error, setError] = useState<string | null>(null);
+  const save = useMutation({
+    mutationFn: (body: Record<string, unknown>) =>
+      platformApiFetch(config.itemPath!(orgId, String(record.id)), { method: "PATCH", body: JSON.stringify(body) }),
+    onSuccess: () => { onSaved?.(); onClose(); },
+    onError: (err) => setError(err instanceof PlatformApiError ? err.message : "Failed to save"),
+  });
+  return (
+    <GenericForm
+      orgId={orgId} fields={editFieldsFor(config)} error={error} pending={save.isPending} initial={record}
+      onSubmit={(body) => save.mutate(body)} onClose={onClose}
+    />
+  );
+}
+
+/** The tenant's field vocabulary, so edits can reuse the tenant's own patch logic. A picker holds an id, i.e. text. */
+function toEditField(f: ModuleField): EditField {
+  const type: EditField["type"] =
+    f.type === "boolean" ? "checkbox"
+    : f.type === "select" || f.type === "textarea" || f.type === "number" || f.type === "integer" || f.type === "date" || f.type === "email" ? f.type
+    : "text";
+  return { name: f.name, label: f.label, type, options: f.options, required: f.required };
+}
+
+const optionLabel = (o: string) => o.replace(/_/g, " ");
+
+function FieldHint({ hint }: { hint?: string }) {
+  return hint ? <p className="mt-1 text-xs text-muted">{hint}</p> : null;
+}
+
+/**
+ * Create and Edit share this form.
+ *  - Create: blank optional fields are left out of the request.
+ *  - Edit (when `initial` is given): behaves exactly like the tenant's edit screen - only fields that changed are
+ *    sent, a blank clears an optional field, a required field can't be cleared, and numbers are validated. It uses
+ *    the tenant's own buildPatch so the two can't behave differently.
+ */
 function GenericForm({
-  orgId, fields, initial, error, pending, onSubmit,
+  orgId, fields, initial, error, pending, onSubmit, onClose,
 }: {
   orgId: string;
   fields: ModuleField[];
@@ -176,15 +220,16 @@ function GenericForm({
   error: string | null;
   pending: boolean;
   onSubmit: (body: Record<string, unknown>) => void;
+  /** Edit only: closes the modal (Cancel, and when nothing was changed). */
+  onClose?: () => void;
 }) {
-  const [values, setValues] = useState<Record<string, string | boolean>>(() => {
-    const v: Record<string, string | boolean> = {};
-    for (const f of fields) {
-      const existing = initial?.[f.name];
-      v[f.name] = f.type === "boolean" ? Boolean(existing) : existing !== undefined && existing !== null ? String(existing) : "";
-    }
-    return v;
-  });
+  const editing = initial !== undefined;
+  // Edit forms show the tenant's own inline messages ("Name can't be empty.") instead of the browser's generic
+  // required-field bubble, so the superadmin sees exactly what a tenant sees. Create forms keep native validation.
+  const editFields = fields.map(toEditField);
+  const [initialValues] = useState(() => toFormValues(editFields, initial ?? {}));
+  const [values, setValues] = useState<Record<string, string | boolean>>(initialValues);
+  const [localError, setLocalError] = useState<string | null>(null);
 
   function set(name: string, value: string | boolean) {
     setValues((prev) => ({ ...prev, [name]: value }));
@@ -194,60 +239,90 @@ function GenericForm({
     <form
       onSubmit={(e) => {
         e.preventDefault();
+        setLocalError(null);
+        if (editing) {
+          const { patch, error: invalid } = buildPatch(editFields, initialValues, values);
+          if (invalid) { setLocalError(invalid); return; }
+          if (Object.keys(patch).length === 0) { onClose ? onClose() : setLocalError("Nothing to save - no fields were changed."); return; }
+          onSubmit(patch);
+          return;
+        }
         const body: Record<string, unknown> = {};
         for (const f of fields) {
           const v = values[f.name];
           if (v === "" || v === undefined) continue; // omit blanks rather than sending empty strings for optional fields
-          body[f.name] = f.type === "number" ? Number(v) : v;
+          body[f.name] = f.type === "number" || f.type === "integer" ? Number(v) : v;
         }
         onSubmit(body);
       }}
       className="space-y-3"
     >
-      {error && <ErrorState message={error} />}
+      {(localError ?? error) && <ErrorState message={(localError ?? error) as string} />}
       {fields.map((f) => {
         const id = `field-${f.name}`;
         if (f.type === "farm_picker" || f.type === "location_picker" || f.type === "supplier_picker") {
           return (
-            <RelationPickerField
-              key={f.name} id={id} orgId={orgId} field={f}
-              value={String(values[f.name] ?? "")} onChange={(v) => set(f.name, v)}
-            />
+            <div key={f.name}>
+              <RelationPickerField id={id} orgId={orgId} field={f} value={String(values[f.name] ?? "")} onChange={(v) => set(f.name, v)} />
+              <FieldHint hint={f.hint} />
+            </div>
           );
         }
         if (f.type === "select") {
+          // When editing, "Select…" is only offered if the value is already blank - like the tenant form, a value
+          // that is set can be changed but not accidentally wiped to nothing.
+          const blankAllowed = !editing || String(initialValues[f.name] ?? "") === "";
           return (
-            <Select key={f.name} id={id} label={f.label} required={f.required} value={String(values[f.name] ?? "")} onChange={(e) => set(f.name, e.target.value)}>
-              <option value="">Select…</option>
-              {f.options?.map((o) => <option key={o} value={o}>{o}</option>)}
-            </Select>
+            <div key={f.name}>
+              <Select id={id} label={f.label} required={!editing && f.required} value={String(values[f.name] ?? "")} onChange={(e) => set(f.name, e.target.value)}>
+                {blankAllowed && <option value="">Select…</option>}
+                {f.options?.map((o) => <option key={o} value={o}>{optionLabel(o)}</option>)}
+              </Select>
+              <FieldHint hint={f.hint} />
+            </div>
           );
         }
         if (f.type === "textarea") {
           return (
-            <Textarea key={f.name} id={id} label={f.label} required={f.required} value={String(values[f.name] ?? "")} onChange={(e) => set(f.name, e.target.value)} />
+            <div key={f.name}>
+              <Textarea id={id} label={f.label} required={!editing && f.required} value={String(values[f.name] ?? "")} onChange={(e) => set(f.name, e.target.value)} />
+              <FieldHint hint={f.hint} />
+            </div>
           );
         }
         if (f.type === "boolean") {
           return (
-            <label key={f.name} className="flex items-center gap-2 text-sm text-ink">
-              <input type="checkbox" checked={Boolean(values[f.name])} onChange={(e) => set(f.name, e.target.checked)} />
-              {f.label}
-            </label>
+            <div key={f.name}>
+              <label className="flex items-center gap-2 text-sm text-ink">
+                <input type="checkbox" checked={Boolean(values[f.name])} onChange={(e) => set(f.name, e.target.checked)} />
+                {f.label}
+              </label>
+              <FieldHint hint={f.hint} />
+            </div>
           );
         }
         return (
-          <Input
-            key={f.name} id={id} label={f.label} required={f.required}
-            type={f.type === "number" ? "number" : f.type === "date" ? "date" : "text"}
-            placeholder={f.hint}
-            value={String(values[f.name] ?? "")} onChange={(e) => set(f.name, e.target.value)}
-          />
+          <div key={f.name}>
+            <Input
+              id={id} label={f.label} required={!editing && f.required}
+              type={f.type === "number" || f.type === "integer" ? "number" : f.type === "date" ? "date" : f.type === "email" ? "email" : "text"}
+              step={f.type === "integer" ? 1 : f.type === "number" ? "any" : undefined}
+              value={String(values[f.name] ?? "")} onChange={(e) => set(f.name, e.target.value)}
+            />
+            <FieldHint hint={f.hint} />
+          </div>
         );
       })}
-      <Button type="submit" disabled={pending} className="w-full">
-        {pending ? "Saving…" : "Save"}
-      </Button>
+      {editing ? (
+        <div className="flex justify-end gap-2 pt-1">
+          {onClose && <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>}
+          <Button type="submit" disabled={pending}>{pending ? "Saving…" : "Save changes"}</Button>
+        </div>
+      ) : (
+        <Button type="submit" disabled={pending} className="w-full">
+          {pending ? "Saving…" : "Save"}
+        </Button>
+      )}
     </form>
   );
 }

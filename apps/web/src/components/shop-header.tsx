@@ -33,7 +33,7 @@ export function ShopHeader({ orgSlug }: { orgSlug: string }) {
       <div className="bg-ink text-xs text-paper/80">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-0.5 sm:px-6">
           <p className="flex items-center gap-1.5">
-            <Truck className="h-3.5 w-3.5" aria-hidden /> Farm pickup or delivery &middot; buy direct from the grower
+            <Truck className="h-3.5 w-3.5" aria-hidden /> Farm pickup or delivery &middot; buy direct from {data?.farm_name ?? "our farm"}
           </p>
           {data?.phone && (
             <a href={`tel:${data.phone}`} className="hidden items-center gap-1.5 hover:text-paper sm:flex">
@@ -99,11 +99,11 @@ export function ShopHeader({ orgSlug }: { orgSlug: string }) {
         </div>
       </div>
 
-      <nav className="border-b border-hairline bg-white" aria-label="Store sections">
+      <nav className="flex border-b border-hairline bg-white/60" aria-label="Store sections">
         <ul className="mx-auto flex max-w-7xl gap-1 overflow-x-auto px-4 text-sm sm:px-6">
           {nav.map((item) => (
             <li key={item.label} className="shrink-0">
-              <Link href={item.href} className="block px-3 py-2.5 text-ink/80 hover:text-forest hover:underline hover:underline-offset-8">
+              <Link href={item.href} className="block px-3 py-2 text-ink/80 hover:text-forest hover:underline hover:underline-offset-8">
                 {item.label}
               </Link>
             </li>

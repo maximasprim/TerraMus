@@ -3,22 +3,51 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { PlatformShell } from "@/components/platform-shell";
-import { Card, ErrorState, EmptyState, StatusBadge } from "@/components/ui";
+import { PlatformEditModal } from "@/components/platform-resource-browser";
+import { Button, Card, ErrorState, EmptyState, StatusBadge } from "@/components/ui";
 import { platformApiFetch, PlatformApiError } from "@/lib/platform-api";
+import { getModuleConfig } from "@/lib/platform-modules";
+import { usePlatformMe } from "@/lib/use-platform-auth";
+
+/** The animal's editable details, shown on the page so a saved edit is visible straight away. */
+const DETAIL_FIELDS: { key: string; label: string; money?: boolean }[] = [
+  { key: "name", label: "Name" },
+  { key: "ear_tag", label: "Ear tag" },
+  { key: "rfid", label: "RFID" },
+  { key: "breed", label: "Breed" },
+  { key: "category", label: "Category" },
+  { key: "health_status", label: "Health status" },
+  { key: "reproductive_status", label: "Reproductive status" },
+  { key: "current_value", label: "Current value", money: true },
+  { key: "expected_sale_price", label: "Expected sale price", money: true },
+  { key: "target_weight", label: "Target weight (kg)" },
+  { key: "notes", label: "Notes" },
+];
+
+const showDetail = (value: unknown, money?: boolean) => {
+  if (value === null || value === undefined || value === "") return <span className="text-muted">-</span>;
+  return money ? `KES ${Number(value).toLocaleString("en-US", { maximumFractionDigits: 2 })}` : String(value);
+};
 
 /** Health, breeding, and dairy records are per-animal in the API (see
  * platform-modules.ts's comment on why they're not in the generic
  * per-org module browser) - this page is the actual fix for that: land
  * here from a livestock row (rowHref in platform-modules.ts's livestock
- * entry) and see all three histories for that one animal. Read-only -
- * these are workflow-driven records (a pregnancy check, a delivery, a
- * milk session) rather than simple edit-in-place data, so a generic form
- * doesn't fit the way it does for livestock/customers/etc. */
+ * entry) and see all three histories for that one animal. The histories
+ * are read-only - they're workflow-driven records (a pregnancy check, a
+ * delivery, a milk session) rather than simple edit-in-place data, so a
+ * generic form doesn't fit - but the animal itself can be edited here with
+ * the same form as the list (superadmins only). */
 export default function AnimalDetailPage() {
   const { id: orgId, animalId } = useParams<{ id: string; animalId: string }>();
   const [tab, setTab] = useState<"health" | "breeding" | "dairy">("health");
+  const [editing, setEditing] = useState(false);
+  const queryClient = useQueryClient();
+  const { data: me } = usePlatformMe();
+  const canWrite = me?.role === "superadmin"; // same rule as the module lists: viewers can look, not edit
+  const livestockConfig = getModuleConfig("livestock")!;
 
   const animalQuery = useQuery<Record<string, unknown>>({
     queryKey: ["platform-animal", orgId, animalId],
@@ -54,9 +83,12 @@ export default function AnimalDetailPage() {
         <span>/</span>
         <Link href={`/platform/organizations/${orgId}/livestock`} className="hover:underline">Livestock</Link>
       </div>
-      <h1 className="mb-4 font-display text-2xl text-forest">
-        {animal ? `${animal.animal_number} - ${animal.breed ?? animal.species}` : "Animal"}
-      </h1>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <h1 className="font-display text-2xl text-forest">
+          {animal ? `${animal.animal_number} - ${animal.breed ?? animal.species}` : "Animal"}
+        </h1>
+        {canWrite && animal && <Button onClick={() => setEditing(true)}>Edit</Button>}
+      </div>
 
       {animalQuery.error && (
         <ErrorState message={animalQuery.error instanceof PlatformApiError ? animalQuery.error.message : "Failed to load animal"} />
@@ -69,8 +101,28 @@ export default function AnimalDetailPage() {
             <span><span className="text-muted">Sex:</span> {String(animal.sex)}</span>
             <span><span className="text-muted">Status:</span> <StatusBadge status={String(animal.status)} /></span>
           </div>
+          <dl className="mt-4 grid grid-cols-1 gap-x-8 gap-y-3 border-t border-hairline pt-4 text-sm sm:grid-cols-2 lg:grid-cols-3">
+            {DETAIL_FIELDS.map((f) => (
+              <div key={f.key} className={f.key === "notes" ? "sm:col-span-2 lg:col-span-3" : undefined}>
+                <dt className="text-xs uppercase tracking-wider text-muted">{f.label}</dt>
+                <dd className="mt-0.5 whitespace-pre-wrap text-ink">{showDetail(animal[f.key], f.money)}</dd>
+              </div>
+            ))}
+          </dl>
         </Card>
       )}
+
+      <PlatformEditModal
+        orgId={orgId}
+        config={livestockConfig}
+        record={editing && animal ? animal : null}
+        onClose={() => setEditing(false)}
+        onSaved={() => {
+          // refresh this page and the livestock list it came from
+          queryClient.invalidateQueries({ queryKey: ["platform-animal", orgId, animalId] });
+          queryClient.invalidateQueries({ queryKey: ["platform-resource", "livestock", orgId] });
+        }}
+      />
 
       <div className="mb-6 flex gap-1 border-b border-hairline">
         {(["health", "breeding", "dairy"] as const).map((t) => (

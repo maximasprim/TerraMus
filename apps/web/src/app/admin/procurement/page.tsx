@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AdminShell } from "@/components/admin-shell";
 import { EditEntityModal } from "@/components/edit-entity-modal";
@@ -49,6 +49,7 @@ export default function ProcurementPage() {
   const createPo = useMutation({
     mutationFn: (body: {
       supplier_id: string;
+      expected_delivery_date?: string;
       notes?: string;
       items: { inventory_item_id?: string; description: string; quantity: string; unit_cost: string }[];
     }) => apiFetch("/api/v1/procurement/purchase-orders", { method: "POST", body: JSON.stringify(body) }),
@@ -144,13 +145,16 @@ export default function ProcurementPage() {
         <SupplierForm error={supplierError} pending={createSupplier.isPending} onSubmit={(b) => createSupplier.mutate(b)} />
       </Modal>
 
-      <Modal open={poModalOpen} onClose={() => setPoModalOpen(false)} title="New purchase order">
+      <Modal open={poModalOpen} onClose={() => setPoModalOpen(false)} title="New purchase order" size="lg">
         <PoForm
           error={poError}
           pending={createPo.isPending}
           suppliers={suppliersQuery.data ?? []}
+          suppliersLoading={suppliersQuery.isLoading}
           items={itemsQuery.data ?? []}
+          itemsLoading={itemsQuery.isLoading}
           onSubmit={(b) => createPo.mutate(b)}
+          onAddSupplier={() => { setPoModalOpen(false); setSupplierError(null); setSupplierModalOpen(true); }}
         />
       </Modal>
 
@@ -205,110 +209,257 @@ function SupplierForm({
 }
 
 interface PoLine {
+  key: number; // stable React key, so removing a line never scrambles the others' typed values
   inventory_item_id: string;
   description: string;
   quantity: string;
   unit_cost: string;
 }
 
+const money = (n: number) => `KES ${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+const num = (v: string) => (v.trim() === "" ? NaN : Number(v));
+const lineTotal = (l: PoLine) => {
+  const q = num(l.quantity);
+  const c = num(l.unit_cost);
+  return Number.isFinite(q) && Number.isFinite(c) && q > 0 && c >= 0 ? q * c : 0;
+};
+
+/**
+ * Creates a purchase order in three plain steps: who from, what, and any notes.
+ * Each item is its own labelled card (not a row of unlabelled boxes) with a live line total,
+ * and the order total is always visible. The data sent to the API is unchanged, plus the
+ * optional expected delivery date the API already supported.
+ */
 function PoForm({
   onSubmit,
+  onAddSupplier,
   error,
   pending,
   suppliers,
+  suppliersLoading,
   items,
+  itemsLoading,
 }: {
   onSubmit: (body: {
     supplier_id: string;
+    expected_delivery_date?: string;
     notes?: string;
     items: { inventory_item_id?: string; description: string; quantity: string; unit_cost: string }[];
   }) => void;
+  onAddSupplier: () => void;
   error: string | null;
   pending: boolean;
   suppliers: Supplier[];
+  suppliersLoading: boolean;
   items: InventoryItem[];
+  itemsLoading: boolean;
 }) {
-  const [supplierId, setSupplierId] = useState("");
-  const [notes, setNotes] = useState("");
-  const [lines, setLines] = useState<PoLine[]>([{ inventory_item_id: "", description: "", quantity: "1", unit_cost: "0" }]);
+  const seq = useRef(0);
+  const blankLine = (): PoLine => ({ key: ++seq.current, inventory_item_id: "", description: "", quantity: "1", unit_cost: "" });
 
-  const updateLine = (i: number, patch: Partial<PoLine>) =>
-    setLines((prev) => prev.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
+  const [supplierId, setSupplierId] = useState("");
+  const [expectedDate, setExpectedDate] = useState("");
+  const [notes, setNotes] = useState("");
+  const [lines, setLines] = useState<PoLine[]>(() => [blankLine()]);
+
+  const sortedItems = [...items].sort((a, b) => a.name.localeCompare(b.name));
+  const itemById = (id: string) => items.find((it) => it.id === id);
+
+  const updateLine = (key: number, patch: Partial<PoLine>) =>
+    setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l)));
+
+  // Picking an inventory item fills the description for you (unless you've typed your own).
+  const pickItem = (line: PoLine, itemId: string) => {
+    const previousName = itemById(line.inventory_item_id)?.name ?? "";
+    const nextName = itemById(itemId)?.name ?? "";
+    const keepTyped = line.description.trim() !== "" && line.description !== previousName;
+    updateLine(line.key, { inventory_item_id: itemId, description: keepTyped ? line.description : nextName });
+  };
+
+  // Spell out what is still missing instead of leaving a silently greyed-out button.
+  const problems: string[] = [];
+  if (!supplierId) problems.push("choose a supplier");
+  lines.forEach((l, i) => {
+    const n = i + 1;
+    if (!l.description.trim()) problems.push(`describe item ${n}`);
+    if (!(num(l.quantity) > 0)) problems.push(`enter a quantity for item ${n}`);
+    if (!(num(l.unit_cost) >= 0)) problems.push(`enter a price for item ${n}`);
+  });
+  const orderTotal = lines.reduce((sum, l) => sum + lineTotal(l), 0);
 
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
+        if (problems.length > 0) return;
         onSubmit({
           supplier_id: supplierId,
-          notes: notes || undefined,
+          expected_delivery_date: expectedDate || undefined,
+          notes: notes.trim() || undefined,
           items: lines.map((l) => ({
             inventory_item_id: l.inventory_item_id || undefined,
-            description: l.description,
+            description: l.description.trim(),
             quantity: l.quantity,
             unit_cost: l.unit_cost,
           })),
         });
       }}
-      className="space-y-3"
+      className="space-y-6"
     >
-      {error && <ErrorState message={error} />}
-      <Select id="po-supplier" label="Supplier" required value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
-        <option value="">Select a supplier…</option>
-        {suppliers.map((s) => (
-          <option key={s.id} value={s.id}>{s.name}</option>
-        ))}
-      </Select>
+      <p className="text-sm text-muted">
+        Use this to request goods from a supplier. It only creates the order - no stock is added until you mark the
+        goods as received.
+      </p>
 
-      <div className="space-y-2">
-        <p className="text-sm font-medium text-ink">Line items</p>
-        {lines.map((line, i) => (
-          <div key={i} className="grid grid-cols-12 gap-2">
-            <Select
-              className="col-span-4"
-              value={line.inventory_item_id}
-              onChange={(e) => updateLine(i, { inventory_item_id: e.target.value })}
-            >
-              <option value="">Not tracked in inventory</option>
-              {items.map((it) => (
-                <option key={it.id} value={it.id}>{it.name}</option>
+      {/* 1 - who from */}
+      <section aria-labelledby="po-step-1" className="space-y-3">
+        <h3 id="po-step-1" className="text-sm font-semibold text-forest">1. Who are you ordering from?</h3>
+        {!suppliersLoading && suppliers.length === 0 ? (
+          <div className="rounded-md border border-brass/40 bg-brass/10 px-3 py-3 text-sm text-ink">
+            You haven&apos;t added a supplier yet.{" "}
+            <button type="button" onClick={onAddSupplier} className="font-medium text-forest underline">
+              Add a supplier first
+            </button>
+            , then come back to create the order.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Select id="po-supplier" label="Supplier" required value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
+              <option value="">Select a supplier…</option>
+              {suppliers.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
               ))}
             </Select>
-            <Input
-              className="col-span-4"
-              placeholder="Description"
-              required
-              value={line.description}
-              onChange={(e) => updateLine(i, { description: e.target.value })}
-            />
-            <Input
-              className="col-span-2"
-              type="number" min="0.01" step="0.01" placeholder="Qty"
-              value={line.quantity}
-              onChange={(e) => updateLine(i, { quantity: e.target.value })}
-            />
-            <Input
-              className="col-span-2"
-              type="number" min="0" step="0.01" placeholder="Unit cost"
-              value={line.unit_cost}
-              onChange={(e) => updateLine(i, { unit_cost: e.target.value })}
-            />
+            <Input id="po-expected" type="date" label="Expected delivery (optional)" value={expectedDate} onChange={(e) => setExpectedDate(e.target.value)} />
           </div>
-        ))}
-        <Button
-          type="button"
-          variant="ghost"
-          className="text-xs"
-          onClick={() => setLines((prev) => [...prev, { inventory_item_id: "", description: "", quantity: "1", unit_cost: "0" }])}
-        >
-          + Add line
+        )}
+      </section>
+
+      {/* 2 - what */}
+      <section aria-labelledby="po-step-2" className="space-y-3">
+        <div>
+          <h3 id="po-step-2" className="text-sm font-semibold text-forest">2. What are you ordering?</h3>
+          <p className="text-xs text-muted">Add one item for each different thing you are buying.</p>
+        </div>
+
+        {lines.map((line, i) => {
+          const n = i + 1;
+          const picked = itemById(line.inventory_item_id);
+          const qty = num(line.quantity);
+          const priceIsZero = line.unit_cost.trim() !== "" && num(line.unit_cost) === 0; // only warn when 0 was typed on purpose, not on a fresh blank line
+          return (
+            <div key={line.key} role="group" aria-label={`Item ${n}`} className="rounded-lg border border-hairline bg-white/60 p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted">Item {n}</p>
+                {lines.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => setLines((prev) => prev.filter((l) => l.key !== line.key))}
+                    className="text-xs text-clay hover:underline"
+                    aria-label={`Remove item ${n}`}
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <Select
+                    id={`po-item-${line.key}`}
+                    label="Inventory item (optional)"
+                    value={line.inventory_item_id}
+                    onChange={(e) => pickItem(line, e.target.value)}
+                  >
+                    <option value="">Not an inventory item (e.g. delivery fee, service)</option>
+                    {sortedItems.map((it) => (
+                      <option key={it.id} value={it.id}>{it.name}</option>
+                    ))}
+                  </Select>
+                  <p className="mt-1 text-xs text-muted">
+                    {itemsLoading
+                      ? "Loading your inventory…"
+                      : picked
+                        ? `When received, ${Number.isFinite(qty) && qty > 0 ? `${qty} ${picked.unit}` : "the quantity"} will be added to ${picked.name} (stock now: ${Number(picked.current_stock).toLocaleString("en-US")} ${picked.unit}).`
+                        : items.length === 0
+                          ? "Tip: add the things you buy under Inventory, and receiving an order will update your stock automatically."
+                          : "Pick the inventory item to have its stock updated when this order is received. Leave as is for anything that isn't stocked."}
+                  </p>
+                </div>
+
+                <Input
+                  id={`po-desc-${line.key}`}
+                  label="Description"
+                  required
+                  maxLength={255}
+                  placeholder="e.g. Dairy meal, 70 kg bag"
+                  value={line.description}
+                  onChange={(e) => updateLine(line.key, { description: e.target.value })}
+                />
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  <Input
+                    id={`po-qty-${line.key}`}
+                    label={`Quantity${picked ? ` (${picked.unit})` : ""}`}
+                    type="number" inputMode="decimal" min="0.01" step="0.01"
+                    value={line.quantity}
+                    onChange={(e) => updateLine(line.key, { quantity: e.target.value })}
+                  />
+                  <Input
+                    id={`po-cost-${line.key}`}
+                    label="Price per unit (KES)"
+                    type="number" inputMode="decimal" min="0" step="0.01" placeholder="0.00"
+                    value={line.unit_cost}
+                    onChange={(e) => updateLine(line.key, { unit_cost: e.target.value })}
+                  />
+                  <div>
+                    <p className="mb-1 block text-sm font-medium text-ink">Line total</p>
+                    <p aria-label={`Total for item ${n}`} className="rounded-md border border-transparent bg-hairline/30 px-3 py-2 text-sm font-medium tabular-nums text-ink">
+                      {money(lineTotal(line))}
+                    </p>
+                  </div>
+                </div>
+                {priceIsZero && (
+                  <p className="text-xs text-brass">The price is 0 - enter what you expect to pay per unit, unless this item is free.</p>
+                )}
+              </div>
+            </div>
+          );
+        })}
+
+        <Button type="button" variant="ghost" className="text-sm" onClick={() => setLines((prev) => [...prev, blankLine()])}>
+          + Add another item
+        </Button>
+
+        <div className="flex items-center justify-between rounded-lg bg-forest/5 px-4 py-3" aria-live="polite">
+          <span className="text-sm text-muted">{lines.length} item{lines.length === 1 ? "" : "s"}</span>
+          <span className="text-sm text-ink">
+            Order total <strong data-testid="po-total" className="ml-2 font-display text-lg text-forest tabular-nums">{money(orderTotal)}</strong>
+          </span>
+        </div>
+      </section>
+
+      {/* 3 - notes */}
+      <section aria-labelledby="po-step-3" className="space-y-3">
+        <h3 id="po-step-3" className="text-sm font-semibold text-forest">3. Anything else?</h3>
+        <Textarea
+          id="po-notes"
+          label="Notes (optional)"
+          placeholder="Anything the supplier or your team should know, e.g. delivery instructions"
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+        />
+      </section>
+
+      <div className="space-y-2">
+        {error && <ErrorState message={error} />}
+        {problems.length > 0 && (
+          <p className="text-xs text-muted" data-testid="po-problems">Still needed: {problems.join(", ")}.</p>
+        )}
+        <Button type="submit" disabled={pending || problems.length > 0} className="w-full">
+          {pending ? "Creating…" : "Create purchase order"}
         </Button>
       </div>
-
-      <Textarea id="po-notes" label="Notes" value={notes} onChange={(e) => setNotes(e.target.value)} />
-      <Button type="submit" disabled={pending || !supplierId} className="w-full">
-        {pending ? "Creating…" : "Create purchase order"}
-      </Button>
     </form>
   );
 }

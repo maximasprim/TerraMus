@@ -23,7 +23,7 @@ export default function CustomerLoginPage() {
   return (
     <div className="min-h-screen bg-paper">
       <ShopHeader orgSlug={orgSlug} />
-      <main className="mx-auto max-w-sm px-6 py-10">
+      <main className="mx-auto max-w-sm px-6 mt-10 py-10">
         <Card>
           <h1 className="mb-4 font-display text-2xl text-forest">Log in</h1>
           {error && <div className="mb-3"><ErrorState message={error} /></div>}

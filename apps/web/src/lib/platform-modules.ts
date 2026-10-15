@@ -20,7 +20,9 @@
 // exactly - see HOW_TO_APPLY.md for the full endpoint list this was built
 // against.
 
-export type FieldType = "text" | "number" | "date" | "boolean" | "select" | "textarea" | "farm_picker" | "location_picker" | "supplier_picker";
+import { EDIT_CONFIGS, type EditEntity, type EditField } from "@/lib/edit-configs";
+
+export type FieldType = "text" | "number" | "integer" | "email" | "date" | "boolean" | "select" | "textarea" | "farm_picker" | "location_picker" | "supplier_picker";
 
 export interface ModuleField {
   name: string;
@@ -40,6 +42,33 @@ export interface ModuleColumn {
   format?: "date" | "currency" | "badge" | "shortid" | "raw";
 }
 
+const EDIT_TYPE_TO_FIELD_TYPE: Record<EditField["type"], FieldType> = {
+  text: "text", textarea: "textarea", number: "number", integer: "integer", date: "date", email: "email", select: "select", checkbox: "boolean",
+};
+
+function fromTenantField(f: EditField): ModuleField {
+  return { name: f.name, label: f.label, type: EDIT_TYPE_TO_FIELD_TYPE[f.type], required: f.required, options: f.options, hint: f.hint };
+}
+
+/**
+ * The fields this module's Edit form shows: everything the tenant can edit for the same record (taken from the
+ * tenant's own list, so it matches exactly - labels, dropdown values, which can't be cleared) followed by any
+ * extra fields only the platform console offers (e.g. re-assigning a location).
+ */
+/** "Customers" -> "Customer". Chopping the last letter blindly turned "Livestock" into "Livestoc" and "Inventory" into "Inventor". */
+export function singularLabel(config: ModuleConfig): string {
+  if (config.singular) return config.singular;
+  return config.label.endsWith("s") ? config.label.slice(0, -1) : config.label;
+}
+
+export function editFieldsFor(config: ModuleConfig): ModuleField[] {
+  const own = [...(config.fields ?? []).filter((f) => !f.createOnly), ...(config.editExtraFields ?? [])];
+  if (!config.editEntity) return own;
+  const tenant = (EDIT_CONFIGS[config.editEntity].fields as EditField[]).map(fromTenantField);
+  const tenantNames = new Set(tenant.map((f) => f.name));
+  return [...tenant, ...own.filter((f) => !tenantNames.has(f.name))];
+}
+
 export interface ModuleConfig {
   slug: string;
   label: string;
@@ -47,6 +76,12 @@ export interface ModuleConfig {
   columns: ModuleColumn[];
   fields?: ModuleField[]; // present => full CRUD
   editExtraFields?: ModuleField[]; // fields valid on PATCH but not on create (e.g. status), shown only in the edit form
+  /** The tenant "Edit" screen this module mirrors (a key of EDIT_CONFIGS). Everything a tenant can edit is
+   * always offered in this module's Edit form too - it is read from the tenant's own field list, so the two can
+   * never drift apart. Fields listed here in `fields`/`editExtraFields` that tenants don't have stay as extras. */
+  editEntity?: EditEntity;
+  /** Singular noun for modal titles ("Create Animal"). Defaults to the label minus a trailing "s". */
+  singular?: string;
   createPath?: (orgId: string) => string;
   itemPath?: (orgId: string, id: string) => string; // PATCH target for edit
   statusAction?: { field: string; label: string; options: string[]; path: (orgId: string, id: string) => string; /** HTTP verb the backend route uses; defaults to PATCH (livestock/crops status routes are POST). */ method?: "PATCH" | "POST" };
@@ -61,6 +96,8 @@ export const PLATFORM_MODULES: ModuleConfig[] = [
   {
     slug: "livestock",
     label: "Livestock",
+    singular: "Animal",
+    editEntity: "livestock",
     listPath: (org) => `/api/v1/platform/organizations/${org}/livestock`,
     createPath: (org) => `/api/v1/platform/organizations/${org}/livestock`,
     itemPath: (org, id) => `/api/v1/platform/organizations/${org}/livestock/${id}`,
@@ -71,13 +108,15 @@ export const PLATFORM_MODULES: ModuleConfig[] = [
     ],
     fields: [
       { name: "farm_id", createOnly: true, label: "Farm", type: "farm_picker", required: true },
+      { name: "location_id", createOnly: true, label: "Location (optional)", type: "location_picker", hint: "A location inside the farm you picked. Moving an animal later is done through Movements." },
       { name: "animal_number", createOnly: true, label: "Animal number", type: "text", required: true },
-      { name: "species", createOnly: true, label: "Species", type: "select", required: true, options: ["cattle", "sheep"] },
+      { name: "species", createOnly: true, label: "Species", type: "select", required: true, options: ["cattle", "sheep", "goat", "pig", "rabbit", "poultry", "camel", "donkey"] },
       { name: "breed", label: "Breed", type: "text" },
       { name: "sex", createOnly: true, label: "Sex", type: "select", required: true, options: ["male", "female"] },
       { name: "acquisition_date", createOnly: true, label: "Acquisition date", type: "date", required: true },
       { name: "acquisition_method", createOnly: true, label: "Acquisition method", type: "select", required: true, options: ["purchased", "born_on_farm", "transferred_in", "gifted"] },
       { name: "acquisition_cost", createOnly: true, label: "Acquisition cost (KES)", type: "number" },
+      { name: "current_weight", createOnly: true, label: "Current weight (kg)", type: "number" },
     ],
     // The closest thing to "delete" this product has: there is no hard
     // delete for an animal anywhere (tenant-side either) - herd financial
@@ -94,6 +133,7 @@ export const PLATFORM_MODULES: ModuleConfig[] = [
     {
     slug: "crops",
     label: "Crops",
+    editEntity: "crops",
     listPath: (org) => `/api/v1/platform/organizations/${org}/crops`,
     createPath: (org) => `/api/v1/platform/organizations/${org}/crops`,
     itemPath: (org, id) => `/api/v1/platform/organizations/${org}/crops/${id}`,
@@ -153,13 +193,14 @@ export const PLATFORM_MODULES: ModuleConfig[] = [
       { name: "phone", label: "Phone", type: "text" },
       { name: "email", label: "Email", type: "text" },
       { name: "location", label: "Location", type: "text" },
-      { name: "customer_type", label: "Type", type: "select", options: ["individual", "business"] },
+      { name: "customer_type", label: "Type", type: "select", options: ["individual", "farm", "butcher", "livestock_trader", "hotel", "restaurant", "institution", "wholesaler", "corporate"] },
       { name: "notes", label: "Notes", type: "textarea" },
     ],
   },
   {
     slug: "employees",
     label: "Employees",
+    editEntity: "employees",
     listPath: (org) => `/api/v1/platform/organizations/${org}/employees`,
     createPath: (org) => `/api/v1/platform/organizations/${org}/employees`,
     itemPath: (org, id) => `/api/v1/platform/organizations/${org}/employees/${id}`,
@@ -188,6 +229,7 @@ export const PLATFORM_MODULES: ModuleConfig[] = [
   {
     slug: "assets",
     label: "Assets",
+    editEntity: "assets",
     listPath: (org) => `/api/v1/platform/organizations/${org}/assets`,
     createPath: (org) => `/api/v1/platform/organizations/${org}/assets`,
     itemPath: (org, id) => `/api/v1/platform/organizations/${org}/assets/${id}`,
@@ -197,11 +239,13 @@ export const PLATFORM_MODULES: ModuleConfig[] = [
     ],
     fields: [
       { name: "name", label: "Name", type: "text", required: true },
-      { name: "asset_type", createOnly: true, label: "Type", type: "select", required: true, options: ["vehicle", "equipment", "structure", "tool", "other"] },
+      { name: "asset_type", createOnly: true, label: "Type", type: "select", required: true, options: ["tractor", "vehicle", "machinery", "tool", "milking_equipment", "pump", "generator", "water_system", "building", "fence", "other"] },
       { name: "serial_number", label: "Serial number", type: "text" },
       { name: "condition", label: "Condition", type: "select", options: ["excellent", "good", "fair", "poor", "out_of_service"] },
       { name: "acquisition_date", createOnly: true, label: "Acquisition date", type: "date" },
       { name: "acquisition_cost", createOnly: true, label: "Acquisition cost (KES)", type: "number" },
+      { name: "useful_life_years", label: "Useful life (years)", type: "integer" },
+      { name: "salvage_value", label: "Salvage value (KES)", type: "number" },
       { name: "assigned_farm_id", label: "Assigned farm", type: "farm_picker" },
       { name: "assigned_location_id", label: "Assigned location", type: "location_picker" },
       { name: "supplier_id", label: "Supplier", type: "supplier_picker" },
@@ -217,6 +261,7 @@ export const PLATFORM_MODULES: ModuleConfig[] = [
   {
     slug: "inventory",
     label: "Inventory",
+    singular: "Inventory item",
     listPath: (org) => `/api/v1/platform/organizations/${org}/inventory/items`,
     createPath: (org) => `/api/v1/platform/organizations/${org}/inventory/items`,
     columns: [
@@ -225,7 +270,7 @@ export const PLATFORM_MODULES: ModuleConfig[] = [
     ],
     fields: [
       { name: "name", label: "Name", type: "text", required: true },
-      { name: "category", label: "Category", type: "select", required: true, options: ["feed", "medication", "supplies", "equipment", "other"] },
+      { name: "category", label: "Category", type: "select", required: true, options: ["feed", "medicine", "vaccine", "supply", "equipment", "consumable"] },
       { name: "unit", label: "Unit (e.g. kg, L, bag)", type: "text", required: true },
       { name: "farm_id", label: "Farm", type: "farm_picker" },
       { name: "reorder_level", label: "Reorder level", type: "number" },
@@ -235,6 +280,7 @@ export const PLATFORM_MODULES: ModuleConfig[] = [
   {
     slug: "suppliers",
     label: "Suppliers",
+    editEntity: "suppliers",
     listPath: (org) => `/api/v1/platform/organizations/${org}/procurement/suppliers`,
     createPath: (org) => `/api/v1/platform/organizations/${org}/procurement/suppliers`,
     itemPath: (org, id) => `/api/v1/platform/organizations/${org}/procurement/suppliers/${id}`,

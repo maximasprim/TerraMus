@@ -201,16 +201,19 @@ export function Modal({
   onClose,
   title,
   children,
+  size = "md",
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
   children: ReactNode;
+  /** Width: "md" (default, unchanged) suits short forms; "lg" gives roomier forms such as multi-line orders. */
+  size?: "md" | "lg";
 }) {
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 px-4">
-      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-lg border border-hairline bg-paper p-6 shadow-xl">
+      <div className={clsx("max-h-[90vh] w-full overflow-y-auto rounded-lg border border-hairline bg-paper p-6 shadow-xl", size === "lg" ? "max-w-2xl" : "max-w-lg")}>
         <div className="mb-4 flex items-center justify-between">
           <h2 className="font-display text-lg text-forest">{title}</h2>
           <button onClick={onClose} className="text-muted hover:text-ink" aria-label="Close">
