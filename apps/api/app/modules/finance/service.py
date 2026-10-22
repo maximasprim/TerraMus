@@ -18,6 +18,7 @@ async def record_transaction(
         organization_id=org_id, transaction_type=req.transaction_type, category=req.category,
         amount=req.amount, transaction_date=req.transaction_date, description=req.description,
         reference_type=reference_type, reference_id=reference_id, created_by=user_id,
+        farm_id=getattr(req, "farm_id", None), activity=getattr(req, "activity", None),
     )
     db.add(txn)
     await db.commit()
@@ -29,6 +30,7 @@ async def list_transactions(
     db: AsyncSession, org_id: uuid.UUID,
     start_date: date | None = None, end_date: date | None = None,
     transaction_type: str | None = None, category: str | None = None,
+    farm_id: uuid.UUID | None = None, activity: str | None = None,
 ) -> list[FinanceTransaction]:
     query = select(FinanceTransaction).where(FinanceTransaction.organization_id == org_id)
     if start_date:
@@ -39,6 +41,10 @@ async def list_transactions(
         query = query.where(FinanceTransaction.transaction_type == transaction_type)
     if category:
         query = query.where(FinanceTransaction.category == category)
+    if farm_id:
+        query = query.where(FinanceTransaction.farm_id == farm_id)
+    if activity:
+        query = query.where(FinanceTransaction.activity == activity)
     result = await db.execute(query.order_by(FinanceTransaction.transaction_date.desc()))
     return list(result.scalars().all())
 
@@ -145,3 +151,57 @@ async def render_invoice_pdf_bytes(db: AsyncSession, org_id: uuid.UUID, order_id
     organization = org_result.scalar_one()  # org_id always exists - it's the authenticated caller's own org
 
     return render_invoice_pdf(invoice, order, customer, organization)
+
+
+# Activity assumed for ledger rows that never recorded one, inferred from their category.
+_ACTIVITY_BY_CATEGORY = {
+    "livestock_sale": "livestock", "livestock_acquisition": "livestock", "milk_sale": "dairy", "crop_sale": "crops",
+    "fodder_sale": "fodder", "poultry_sale": "poultry", "egg_sale": "poultry", "fish_sale": "fish",
+    "rabbit_sale": "rabbits", "training_revenue": "training", "seed": "crops", "fertilizer": "crops", "chemicals": "crops",
+}
+
+
+async def get_profitability(db: AsyncSession, org_id: uuid.UUID, start_date: date, end_date: date,
+                            farm_id: uuid.UUID | None = None, activity: str | None = None) -> dict:
+    """Income/expense/net by activity, by sub-farm, by category and by month. Rows with no recorded
+    activity use a category-based default (livestock_sale -> livestock ...), else 'unassigned'."""
+    from app.modules.farm.models import Farm
+    T = FinanceTransaction
+    month = func.to_char(T.transaction_date, "YYYY-MM")
+    q = (select(T.transaction_type, T.activity, T.farm_id, T.category, month, func.sum(T.amount))
+         .where(T.organization_id == org_id, T.transaction_date >= start_date, T.transaction_date <= end_date)
+         .group_by(T.transaction_type, T.activity, T.farm_id, T.category, month))
+    if farm_id:
+        q = q.where(T.farm_id == farm_id)
+    rows = (await db.execute(q)).all()
+    names = {f.id: f.name for f in (await db.execute(select(Farm).where(Farm.organization_id == org_id))).scalars()}
+
+    def bucket():
+        return {"income": Decimal("0"), "expense": Decimal("0")}
+    by_act, by_farm, by_cat, by_month = {}, {}, {}, {}
+    for ttype, act, fid, cat, mon, total in rows:
+        eff = act or _ACTIVITY_BY_CATEGORY.get(cat, "unassigned")
+        if activity and eff != activity:
+            continue
+        amt = Decimal(total)
+        by_act.setdefault(eff, bucket())[ttype] += amt
+        by_farm.setdefault(fid, bucket())[ttype] += amt
+        by_cat.setdefault((ttype, cat), Decimal("0"))
+        by_cat[(ttype, cat)] += amt
+        by_month.setdefault(mon, bucket())[ttype] += amt
+
+    def fmt(b):
+        net = b["income"] - b["expense"]
+        return {"income": float(b["income"]), "expense": float(b["expense"]), "net": float(net),
+                "margin_pct": round(float(net / b["income"] * 100), 1) if b["income"] else None}
+    tot = bucket()
+    for b in by_act.values():
+        tot["income"] += b["income"]; tot["expense"] += b["expense"]
+    return {
+        "start_date": start_date, "end_date": end_date, "farm_id": farm_id, "activity": activity,
+        "totals": fmt(tot),
+        "by_activity": [{"activity": k, **fmt(v)} for k, v in sorted(by_act.items(), key=lambda x: -(x[1]["income"] - x[1]["expense"]))],
+        "by_farm": [{"farm_id": k, "farm_name": names.get(k, "Unassigned (no sub-farm recorded)"), **fmt(v)} for k, v in by_farm.items()],
+        "by_category": [{"type": t, "category": c, "amount": float(a)} for (t, c), a in sorted(by_cat.items())],
+        "by_month": [{"month": m, **fmt(v)} for m, v in sorted(by_month.items())],
+    }

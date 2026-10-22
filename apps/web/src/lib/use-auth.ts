@@ -3,14 +3,28 @@
 import { useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiFetch, clearTokens, getAccessToken, setTokens } from "@/lib/api";
+import { apiFetch, clearTokens, getAccessToken, isNetworkFailure, readCachedMe, setTokens, writeCachedMe } from "@/lib/api";
 import { hasPermission } from "@/lib/permissions";
 import type { MeResponse, TokenPair } from "@/lib/types";
 
 export function useMe() {
   return useQuery<MeResponse>({
     queryKey: ["me"],
-    queryFn: () => apiFetch<MeResponse>("/api/v1/auth/me"),
+    queryFn: async () => {
+      try {
+        const me = await apiFetch<MeResponse>("/api/v1/auth/me");
+        writeCachedMe(me);
+        return me;
+      } catch (e) {
+        // No signal (e.g. at the crush pen): open with the last known profile instead of failing.
+        // The backend re-checks every permission on every request, so a stale copy cannot grant access.
+        if (isNetworkFailure(e)) {
+          const cached = readCachedMe<MeResponse>();
+          if (cached) return cached;
+        }
+        throw e;
+      }
+    },
     enabled: typeof window !== "undefined" && !!getAccessToken(),
     retry: false,
   });
@@ -36,6 +50,8 @@ export function useRequireAuth() {
       return;
     }
     if (meQuery.isError) {
+      // A lost connection is not a lost session: never sign the user out because the network is down.
+      if (isNetworkFailure(meQuery.error)) return;
       clearTokens();
       router.replace("/login");
       return;

@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AdminShell } from "@/components/admin-shell";
+import { AnimalPhotoCard } from "@/components/animal-photo";
 import { Can } from "@/components/can";
 import { EditEntityModal } from "@/components/edit-entity-modal";
 import { useCan } from "@/lib/use-auth";
@@ -24,13 +25,14 @@ const RECORD_TYPES = [
 // kept in sync by hand since this is a small, stable table; the backend is
 // still the enforcement point (this only avoids offering an invalid choice).
 const ALLOWED_TRANSITIONS: Record<string, string[]> = {
-  active: ["for_sale", "quarantined", "missing", "deceased", "transferred", "archived"],
-  quarantined: ["active", "deceased", "missing"],
-  for_sale: ["reserved", "active", "sold", "deceased", "missing"],
+  active: ["for_sale", "quarantined", "missing", "deceased", "transferred", "archived", "culled"],
+  quarantined: ["active", "deceased", "missing", "culled"],
+  for_sale: ["reserved", "active", "sold", "deceased", "missing", "culled"],
   reserved: ["sold", "for_sale", "deceased"],
   sold: [],
   transferred: [],
   deceased: [],
+  culled: [],
   missing: ["active", "deceased"],
   archived: [],
 };
@@ -297,6 +299,7 @@ export default function AnimalDetailPage() {
 
       {tab === "Overview" && (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <AnimalPhotoCard animalId={id} canEdit={can("livestock.update")} />
           <Card>
             <h2 className="mb-3 font-display text-lg text-forest">Details</h2>
             <dl className="space-y-2 text-sm">

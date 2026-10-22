@@ -7,8 +7,11 @@ from pydantic import BaseModel, ConfigDict, Field
 TRANSACTION_TYPE_PATTERN = "^(income|expense)$"
 CATEGORY_PATTERN = (
     "^(livestock_sale|milk_sale|other_revenue|livestock_acquisition|feed|veterinary|"
-    "labour|transport|utilities|maintenance|equipment|marketing|payment_processing_fee|other_expense)$"
+    "labour|transport|utilities|maintenance|equipment|marketing|payment_processing_fee|other_expense|"
+    "crop_sale|fodder_sale|poultry_sale|egg_sale|fish_sale|rabbit_sale|training_revenue|"
+    "seed|fertilizer|chemicals|fuel|lease|insurance)$"
 )
+ACTIVITY_PATTERN = "^(livestock|feedlot|dairy|crops|fodder|poultry|fish|rabbits|training|general)$"
 
 
 class FinanceTransactionCreate(BaseModel):
@@ -17,6 +20,8 @@ class FinanceTransactionCreate(BaseModel):
     amount: Decimal = Field(gt=0)
     transaction_date: date
     description: str | None = None
+    farm_id: uuid.UUID | None = None
+    activity: str | None = Field(default=None, pattern=ACTIVITY_PATTERN)
 
 
 class FinanceTransactionOut(BaseModel):
@@ -30,6 +35,8 @@ class FinanceTransactionOut(BaseModel):
     reference_id: uuid.UUID | None
     description: str | None
     transaction_date: date
+    farm_id: uuid.UUID | None = None
+    activity: str | None = None
     created_by: uuid.UUID | None
     created_at: datetime
 

@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime, timezone
 
-from sqlalchemy import String, Numeric, Date, DateTime, Integer
+from sqlalchemy import String, Numeric, Date, DateTime, Integer, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -13,7 +13,11 @@ TRANSACTION_CATEGORIES = (
     "livestock_sale", "milk_sale", "other_revenue",
     "livestock_acquisition", "feed", "veterinary", "labour", "transport",
     "utilities", "maintenance", "equipment", "marketing", "payment_processing_fee", "other_expense",
+    # added with the sub-farm / activity reporting work
+    "crop_sale", "fodder_sale", "poultry_sale", "egg_sale", "fish_sale", "rabbit_sale", "training_revenue",
+    "seed", "fertilizer", "chemicals", "fuel", "lease", "insurance",
 )
+ACTIVITIES = ("livestock", "feedlot", "dairy", "crops", "fodder", "poultry", "fish", "rabbits", "training", "general")
 
 
 class FinanceTransaction(Base, UUIDPKMixin):
@@ -31,6 +35,9 @@ class FinanceTransaction(Base, UUIDPKMixin):
     reference_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     description: Mapped[str | None] = mapped_column(String(255), nullable=True)
     transaction_date: Mapped[date] = mapped_column(Date, index=True)
+    # Optional reporting dimensions (NULL for older rows and for entries that did not specify them)
+    farm_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("farms.id"), nullable=True, index=True)
+    activity: Mapped[str | None] = mapped_column(String(24), nullable=True, index=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)

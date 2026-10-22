@@ -699,3 +699,14 @@ have only been type-checked and audited against the backend, not clicked through
 PaymentIntent `client_secret`. Analytics endpoints (`/health/due`, `/breeding/upcoming-deliveries`,
 `/dairy/summary`, per-animal profitability) have no UI. The Terraform changes have never been
 `plan`ned.
+
+---
+
+## Feedlot, worksheet import/export, receivables, training, flocks & fish (October 2026)
+
+Adds feedlot batch management and weigh days, an **exact-format Bulls WG worksheet import/export**, customer receivables
+(credit sales, ageing), finance by sub-farm and activity, training services, flock/fish groups, fuel logs, moderated
+product reviews and animal photos. Migrations 0029-0031 (additive). See
+[`docs/FEEDLOT_AND_OPERATIONS.md`](docs/FEEDLOT_AND_OPERATIONS.md) for the design, the worksheet-to-system mapping, the
+corrections made to the manual calculations, and what is still open.
+

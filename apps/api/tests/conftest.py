@@ -42,10 +42,56 @@ def _run_alembic(command: str) -> None:
         raise RuntimeError(f"alembic {command} failed:\n{result.stdout}\n{result.stderr}")
 
 
+_TEMPLATE_DB = "farmdb_test_template"
+_template_ready = False
+
+
+def _admin_conn():
+    import psycopg
+    return psycopg.connect("postgresql://farm:farm@localhost:5432/postgres", autocommit=True)
+
+
+def _ensure_template() -> None:
+    """FAST HARNESS: run the real Alembic chain ONCE into a template database,
+    then clone it per test (CREATE DATABASE ... TEMPLATE) instead of
+    downgrade+upgrade through every migration on every test. Same isolation,
+    same real-migration schema (triggers and partial indexes included)."""
+    global _template_ready
+    if _template_ready:
+        return
+    with _admin_conn() as c:
+        c.execute(f"DROP DATABASE IF EXISTS {_TEMPLATE_DB} WITH (FORCE)")
+        c.execute(f"CREATE DATABASE {_TEMPLATE_DB}")
+    env = os.environ.copy()
+    env["DATABASE_URL"] = f"postgresql+psycopg://farm:farm@localhost:5432/{_TEMPLATE_DB}"
+    r = subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"],
+                       cwd=str(API_ROOT), env=env, capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError(f"alembic upgrade failed:\n{r.stdout}\n{r.stderr}")
+    _template_ready = True
+
+
+def _clone_template() -> None:
+    with _admin_conn() as c:
+        c.execute("DROP DATABASE IF EXISTS farmdb_test WITH (FORCE)")
+        c.execute(f"CREATE DATABASE farmdb_test TEMPLATE {_TEMPLATE_DB}")
+
+
 @pytest_asyncio.fixture
 async def engine():
-    _run_alembic("downgrade")  # start from a clean base each test
-    _run_alembic("upgrade")
+    """Fresh, fully-migrated database per test.
+
+    Default (fast, ~1s/test): migrate once into a template database, then clone it per test.
+    Needs a database user allowed to CREATE DATABASE (the project's `farm` user is a superuser).
+    Set TEST_FULL_MIGRATIONS=1 to use the original method instead (downgrade to base + upgrade to
+    head before EVERY test, ~10s/test) - the same schema, just slower; it also exercises the
+    downgrade path of every migration."""
+    if os.environ.get("TEST_FULL_MIGRATIONS") == "1":
+        _run_alembic("downgrade")
+        _run_alembic("upgrade")
+    else:
+        _ensure_template()
+        _clone_template()
     eng = create_async_engine(TEST_DATABASE_URL_ASYNC)
     yield eng
     await eng.dispose()

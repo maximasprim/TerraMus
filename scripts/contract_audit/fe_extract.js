@@ -134,7 +134,7 @@ for (const file of files) {
         const p = pathText(first, n);
         if (name !== "fetch" || /api\/v1/.test(first.getText(sf))) {
           let method = name === "apiUpload" ? "POST" : "GET", bodyExpr = null;
-          const opts = n.arguments[1];
+          const opts = name === "apiUpload" ? n.arguments[2] : n.arguments[1];   // apiUpload(path, formData, { method })
           if (!/All$/.test(name) && name !== "apiDownload" && opts && ts.isObjectLiteralExpression(opts)) {
             for (const pr of opts.properties) if (ts.isPropertyAssignment(pr)) {
               const k = pr.name.getText(sf);

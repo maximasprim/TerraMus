@@ -33,6 +33,34 @@ export function setTokens(access: string, refresh: string) {
 export function clearTokens() {
   localStorage.removeItem(ACCESS_KEY);
   localStorage.removeItem(REFRESH_KEY);
+  localStorage.removeItem(ME_CACHE_KEY);   // the cached profile must not outlive the session
+}
+
+// The last successful "who am I" answer, kept so the app can open with no signal (see useMe).
+const ME_CACHE_KEY = "farm.me_cache";
+
+export function readCachedMe<T>(): T | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(ME_CACHE_KEY);
+    return raw ? (JSON.parse(raw) as T) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function writeCachedMe(me: unknown): void {
+  try {
+    localStorage.setItem(ME_CACHE_KEY, JSON.stringify(me));
+  } catch {
+    /* storage full or blocked: offline start-up is a convenience, never required */
+  }
+}
+
+/** True when the request never reached the server (offline, DNS, timeout) - as opposed to the server
+ * answering with an error status, which is an ApiError. A lost connection is not a lost session. */
+export function isNetworkFailure(e: unknown): boolean {
+  return e instanceof TypeError;
 }
 
 import { fetchAllPages, formatErrorDetail, type FetchAllOptions } from "@/lib/api-utils";
@@ -194,6 +222,22 @@ export async function apiDownload(path: string, filename: string): Promise<void>
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+/** GET a binary resource (e.g. an animal photo) as a Blob, with the same silent token refresh as apiFetch.
+ * Resolves to null on 404 so callers can show an empty state instead of an error. */
+export async function apiBlob(path: string): Promise<Blob | null> {
+  const doFetch = (token: string | null) =>
+    fetch(`${API_BASE}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : undefined });
+  const tokenUsed = getAccessToken();
+  let resp = await doFetch(tokenUsed);
+  if (resp.status === 401) {
+    const newToken = await tokenAfter401(tokenUsed);
+    if (newToken) resp = await doFetch(newToken);
+  }
+  if (resp.status === 404) return null;
+  if (!resp.ok) throw new ApiError(resp.status, resp.statusText);
+  return resp.blob();
 }
 
 /** GET a list endpoint that paginates, returning every row (see api-utils.fetchAllPages). */

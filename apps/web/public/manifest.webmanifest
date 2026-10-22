@@ -1,0 +1,15 @@
+{
+  "name": "TerraMus Farm Management",
+  "short_name": "TerraMus",
+  "description": "Farm management: weigh animals, record flocks and sales, even with no signal.",
+  "start_url": "/admin/feedlot#weigh",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#F7F3EA",
+  "theme_color": "#1F3A2E",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

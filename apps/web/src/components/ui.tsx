@@ -53,6 +53,7 @@ const statusStyles: Record<string, string> = {
   sold: "bg-forest/10 text-forest border-forest/30",
   deceased: "bg-clay/10 text-clay border-clay/30",
   quarantined: "bg-clay/10 text-clay border-clay/30",
+  culled: "bg-clay/10 text-clay border-clay/30",
   transferred: "bg-muted/10 text-muted border-muted/30",
   missing: "bg-clay/10 text-clay border-clay/30",
   archived: "bg-muted/10 text-muted border-muted/30",

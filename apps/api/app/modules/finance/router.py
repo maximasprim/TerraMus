@@ -18,10 +18,13 @@ async def list_transactions(
     end_date: date | None = Query(None),
     transaction_type: str | None = Query(None),
     category: str | None = Query(None),
+    farm_id: uuid.UUID | None = Query(None),
+    activity: str | None = Query(None),
     user: User = Depends(require_permission("finance.read")),
     db: AsyncSession = Depends(get_db),
 ):
-    return await service.list_transactions(db, user.organization_id, start_date, end_date, transaction_type, category)
+    return await service.list_transactions(db, user.organization_id, start_date, end_date, transaction_type, category,
+                                           farm_id, activity)
 
 
 @router.post("/transactions", response_model=schemas.FinanceTransactionOut, status_code=201)
@@ -65,3 +68,16 @@ async def get_invoice_pdf(
         content=pdf_bytes, media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename=invoice_{order_id}.pdf"},
     )
+
+
+@router.get("/profitability")
+async def profitability(
+    start_date: date = Query(...),
+    end_date: date = Query(...),
+    farm_id: uuid.UUID | None = Query(None, description="Limit to one sub-farm"),
+    activity: str | None = Query(None, pattern=schemas.ACTIVITY_PATTERN, description="Limit to one activity"),
+    user: User = Depends(require_permission("finance.read")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Income, expense and net by activity, sub-farm, category and month."""
+    return await service.get_profitability(db, user.organization_id, start_date, end_date, farm_id, activity)

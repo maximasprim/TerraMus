@@ -1,6 +1,7 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { QueryProvider } from "@/components/query-provider";
+import { SwRegister } from "@/components/sw-register";
 
 // NOTE: next/font/google requires fetching font CSS from fonts.googleapis.com
 // at build time, which this sandbox's network egress doesn't allow (same
@@ -14,13 +15,18 @@ import { QueryProvider } from "@/components/query-provider";
 export const metadata: Metadata = {
   title: "TerraMus - Farm Management Platform",
   description: "Livestock farm management, ERP & E-commerce platform",
+  manifest: "/manifest.json",
+  icons: { icon: "/icon-192.png", apple: "/icon-192.png" },
 };
+
+export const viewport: Viewport = { themeColor: "#1F3A2E" };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body>
         <QueryProvider>{children}</QueryProvider>
+        <SwRegister />
       </body>
     </html>
   );

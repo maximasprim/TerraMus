@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createContext, useContext, useEffect } from "react";
 import { clsx } from "clsx";
-import { LayoutDashboard, BarChart3, Beef, Sprout, LogOut, MapPin, Users, ShoppingCart, Tag, Package, Wallet, Truck, UserCog, Wrench, Search, Settings, UsersRound, CalendarClock, Bell, Newspaper, CreditCard, ExternalLink, Inbox, History } from "lucide-react";
+import { LayoutDashboard, BarChart3, Beef, Sprout, LogOut, MapPin, Users, ShoppingCart, Tag, Package, Wallet, Truck, UserCog, Wrench, Search, Settings, UsersRound, CalendarClock, Bell, Newspaper, CreditCard, ExternalLink, Inbox, History, Bird, Scale, Receipt, Fuel, GraduationCap, Star } from "lucide-react";
 import { useRequireAuth, useLogout } from "@/lib/use-auth";
 import { canAccessPath, firstAccessiblePath } from "@/lib/permissions";
 import { useCatalog } from "@/lib/use-catalog";
@@ -14,20 +14,26 @@ const NAV = [
   { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/admin/reports", label: "Reports", icon: BarChart3 },
   { href: "/admin/livestock", label: "Livestock", icon: Beef },
+  { href: "/admin/feedlot", label: "Feedlot", icon: Scale },
+  { href: "/admin/groups", label: "Flocks & Fish", icon: Bird },
   { href: "/admin/crops", label: "Crops", icon: Sprout },
   { href: "/admin/listings", label: "Listings", icon: Tag },
   { href: "/admin/reservations", label: "Reservations", icon: CalendarClock },
   { href: "/admin/inventory", label: "Inventory", icon: Package },
   { href: "/admin/procurement", label: "Procurement", icon: Truck },
   { href: "/admin/finance", label: "Finance", icon: Wallet },
+  { href: "/admin/receivables", label: "Receivables", icon: Receipt },
   { href: "/admin/billing", label: "Billing", icon: CreditCard },
   { href: "/admin/farms", label: "Farms", icon: MapPin },
   { href: "/admin/employees", label: "Employees", icon: UserCog },
   { href: "/admin/assets", label: "Assets", icon: Wrench },
+  { href: "/admin/fuel", label: "Fuel", icon: Fuel },
   { href: "/admin/customers", label: "Customers", icon: Users },
+  { href: "/admin/training", label: "Training", icon: GraduationCap },
   { href: "/admin/orders", label: "Orders", icon: ShoppingCart },
   { href: "/admin/inquiries", label: "Inquiries", icon: Inbox },
   { href: "/admin/cms", label: "Site Content", icon: Newspaper },
+  { href: "/admin/reviews", label: "Reviews", icon: Star },
   { href: "/admin/notifications", label: "Notifications", icon: Bell },
   { href: "/admin/audit", label: "Audit log", icon: History },
   { href: "/admin/users", label: "Team", icon: UsersRound },

@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
+    "test:logic": "npx --yes tsx scripts/offline-queue.test.ts && npx --yes tsx scripts/offline-auth.test.ts && node scripts/sw.test.mjs",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",

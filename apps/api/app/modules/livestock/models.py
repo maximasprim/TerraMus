@@ -11,12 +11,12 @@ from app.core.database import Base, UUIDPKMixin, TimestampMixin
 # a DB enum, so new statuses can be added without a migration during early phases.
 ANIMAL_STATUSES = (
     "active", "for_sale", "reserved", "sold", "transferred",
-    "deceased", "missing", "quarantined", "archived",
+    "deceased", "missing", "quarantined", "archived", "culled",
 )
 
 # Terminal statuses that must exclude the animal from active-herd calculations
 # (spec §52.7 - "Animal death must remove it from active herd calculations").
-INACTIVE_STATUSES = ("sold", "transferred", "deceased", "archived")
+INACTIVE_STATUSES = ("sold", "transferred", "deceased", "archived", "culled")
 
 
 class Animal(Base, UUIDPKMixin, TimestampMixin):

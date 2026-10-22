@@ -29,7 +29,7 @@ export const colorAt = (i: number): string => CATEGORICAL[i % CATEGORICAL.length
 export const STATUS_COLORS: Record<string, string> = {
   // animals
   active: "#3F6B4A", for_sale: "#B8862B", reserved: "#D9A84C", sold: "#2C4F3E",
-  transferred: "#7A5C3E", deceased: "#A6432E", missing: "#8A8578", quarantined: "#C26A4A", archived: "#B7A99A",
+  transferred: "#7A5C3E", deceased: "#A6432E", missing: "#8A8578", quarantined: "#C26A4A", archived: "#B7A99A", culled: "#8C4A32",
   // orders
   pending: "#D9A84C", payment_pending: "#B8862B", paid: "#3F6B4A", processing: "#6F9A7B",
   ready_for_fulfillment: "#4F7F8C", dispatched: "#2C4F3E", delivered: "#1F3A2E", completed: "#2C4F3E",

@@ -15,15 +15,16 @@ from app.modules.livestock import schemas
 # Anything not listed as a source key is terminal or has no outbound transitions
 # defined yet beyond returning to 'active' (e.g. un-reserving).
 _ALLOWED_TRANSITIONS: dict[str, set[str]] = {
-    "active": {"for_sale", "quarantined", "missing", "deceased", "transferred", "archived"},
-    "quarantined": {"active", "deceased", "missing"},
-    "for_sale": {"reserved", "active", "sold", "deceased", "missing"},
+    "active": {"for_sale", "quarantined", "missing", "deceased", "transferred", "archived", "culled"},
+    "quarantined": {"active", "deceased", "missing", "culled"},
+    "for_sale": {"reserved", "active", "sold", "deceased", "missing", "culled"},
     "reserved": {"sold", "for_sale", "deceased"},
     "sold": set(),          # terminal - spec §52.1: sold livestock cannot be sold again
     "transferred": set(),   # terminal
     "deceased": set(),      # terminal
     "missing": {"active", "deceased"},
     "archived": set(),      # terminal
+    "culled": set(),        # terminal (removed from the herd as unfit; no sale revenue)
 }
 
 

@@ -9,14 +9,31 @@ import { apiFetch, ApiError } from "@/lib/api";
 import type { FinanceTransaction, FinanceSummary, ProfitabilityReport } from "@/lib/types";
 import { clsx } from "clsx";
 
-const TABS = ["Summary", "Transactions", "Profitability"] as const;
+const TABS = ["Summary", "Transactions", "Profitability", "By activity & farm"] as const;
 type Tab = (typeof TABS)[number];
 
 const CATEGORIES = [
   "livestock_sale", "milk_sale", "other_revenue", "livestock_acquisition", "feed",
   "veterinary", "labour", "transport", "utilities", "maintenance", "equipment",
   "marketing", "payment_processing_fee", "other_expense",
+  "crop_sale", "fodder_sale", "poultry_sale", "egg_sale", "fish_sale", "rabbit_sale", "training_revenue",
+  "seed", "fertilizer", "chemicals", "fuel", "lease", "insurance",
 ] as const;
+
+const ACTIVITIES = ["livestock", "feedlot", "dairy", "crops", "fodder", "poultry", "fish", "rabbits", "training", "general"] as const;
+
+interface TxnBody {
+  transaction_type: string; category: string; amount: string; transaction_date: string; description?: string;
+  farm_id?: string; activity?: string;
+}
+interface ActivityRow { activity: string; income: number; expense: number; net: number; margin_pct: number | null }
+interface FarmRow { farm_id: string | null; farm_name: string; income: number; expense: number; net: number }
+interface ActivityReport {
+  totals: { income: number; expense: number; net: number; margin_pct: number | null };
+  by_activity: ActivityRow[]; by_farm: FarmRow[]; by_month: { month: string; income: number; expense: number; net: number }[];
+}
+interface FarmOption { id: string; name: string }
+const money = (n: number) => new Intl.NumberFormat("en-KE", { maximumFractionDigits: 0 }).format(n);
 
 function firstOfMonth() {
   const d = new Date();
@@ -50,8 +67,18 @@ export default function FinancePage() {
     enabled: tab === "Profitability",
   });
 
+  const [reportFarm, setReportFarm] = useState("");
+  const [reportActivity, setReportActivity] = useState("");
+  const farmsQuery = useQuery<FarmOption[]>({ queryKey: ["farms"], queryFn: () => apiFetch<FarmOption[]>("/api/v1/farms") });
+  const activityQuery = useQuery<ActivityReport>({
+    queryKey: ["finance-by-activity", startDate, endDate, reportFarm, reportActivity],
+    queryFn: () => apiFetch<ActivityReport>(
+      `/api/v1/finance/profitability?start_date=${startDate}&end_date=${endDate}${reportFarm ? `&farm_id=${reportFarm}` : ""}${reportActivity ? `&activity=${reportActivity}` : ""}`),
+    enabled: tab === "By activity & farm",
+  });
+
   const createTransaction = useMutation({
-    mutationFn: (body: { transaction_type: string; category: string; amount: string; transaction_date: string; description?: string }) =>
+    mutationFn: (body: TxnBody) =>
       apiFetch("/api/v1/finance/transactions", { method: "POST", body: JSON.stringify(body) }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["finance-transactions"] });
@@ -176,6 +203,50 @@ export default function FinancePage() {
         </Card>
       )}
 
+      {tab === "By activity & farm" && (
+        <div>
+          <div className="mb-4 flex flex-wrap items-end gap-3">
+            <Input id="ba-start" label="From" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+            <Input id="ba-end" label="To" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+            <Select id="ba-farm" label="Sub-farm" value={reportFarm} onChange={(e) => setReportFarm(e.target.value)}>
+              <option value="">All sub-farms</option>
+              {(farmsQuery.data ?? []).map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+            </Select>
+            <Select id="ba-act" label="Activity" value={reportActivity} onChange={(e) => setReportActivity(e.target.value)}>
+              <option value="">All activities</option>
+              {ACTIVITIES.map((a) => <option key={a} value={a}>{a}</option>)}
+            </Select>
+          </div>
+          {activityQuery.error && <ErrorState message={activityQuery.error instanceof ApiError ? activityQuery.error.message : "Failed to load report"} />}
+          {activityQuery.data && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-3 gap-4">
+                <StatCard label="Income (KES)" value={money(activityQuery.data.totals.income)} />
+                <StatCard label="Expenses (KES)" value={money(activityQuery.data.totals.expense)} />
+                <StatCard label="Net (KES)" value={money(activityQuery.data.totals.net)} hint={activityQuery.data.totals.margin_pct == null ? undefined : `${activityQuery.data.totals.margin_pct}% margin`} />
+              </div>
+              <Card>
+                <h2 className="mb-3 font-display text-lg text-forest">By activity</h2>
+                <table className="w-full text-sm"><thead><tr className="border-b border-hairline text-left text-xs uppercase text-muted">
+                  <th className="py-2">Activity</th><th className="text-right">Income</th><th className="text-right">Expenses</th><th className="text-right">Net</th><th className="text-right">Margin</th></tr></thead>
+                  <tbody>{activityQuery.data.by_activity.map((r) => (
+                    <tr key={r.activity} className="border-b border-hairline/60"><td className="py-2 capitalize">{r.activity}</td>
+                      <td className="text-right">{money(r.income)}</td><td className="text-right">{money(r.expense)}</td>
+                      <td className={clsx("text-right font-medium", r.net < 0 && "text-clay")}>{money(r.net)}</td><td className="text-right">{r.margin_pct == null ? "-" : `${r.margin_pct}%`}</td></tr>))}</tbody></table>
+                <p className="mt-2 text-xs text-muted">Entries recorded without an activity are grouped by their category where it is obvious (e.g. livestock sales), otherwise shown as “unassigned”.</p>
+              </Card>
+              <Card>
+                <h2 className="mb-3 font-display text-lg text-forest">By sub-farm</h2>
+                <table className="w-full text-sm"><tbody>{activityQuery.data.by_farm.map((r) => (
+                  <tr key={r.farm_id ?? "none"} className="border-b border-hairline/60"><td className="py-2">{r.farm_name}</td>
+                    <td className="text-right">{money(r.income)}</td><td className="text-right">{money(r.expense)}</td>
+                    <td className={clsx("text-right font-medium", r.net < 0 && "text-clay")}>{money(r.net)}</td></tr>))}</tbody></table>
+              </Card>
+            </div>
+          )}
+        </div>
+      )}
+
       {tab === "Profitability" && (
         <div>
           {profitabilityQuery.data && (
@@ -257,7 +328,7 @@ export default function FinancePage() {
       )}
 
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="Record transaction">
-        <TransactionForm error={formError} pending={createTransaction.isPending} onSubmit={(body) => createTransaction.mutate(body)} />
+        <TransactionForm error={formError} pending={createTransaction.isPending} farms={farmsQuery.data ?? []} onSubmit={(body) => createTransaction.mutate(body)} />
       </Modal>
     </AdminShell>
   );
@@ -267,8 +338,10 @@ function TransactionForm({
   onSubmit,
   error,
   pending,
+  farms,
 }: {
-  onSubmit: (body: { transaction_type: string; category: string; amount: string; transaction_date: string; description?: string }) => void;
+  onSubmit: (body: TxnBody) => void;
+  farms: FarmOption[];
   error: string | null;
   pending: boolean;
 }) {
@@ -277,12 +350,14 @@ function TransactionForm({
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState(today());
   const [description, setDescription] = useState("");
+  const [farmId, setFarmId] = useState("");
+  const [activity, setActivity] = useState("");
 
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        onSubmit({ transaction_type: type, category, amount, transaction_date: date, description: description || undefined });
+        onSubmit({ transaction_type: type, category, amount, transaction_date: date, description: description || undefined, farm_id: farmId || undefined, activity: activity || undefined });
       }}
       className="space-y-3"
     >
@@ -301,6 +376,16 @@ function TransactionForm({
       <div className="grid grid-cols-2 gap-4">
         <Input id="txn-amount" label="Amount (KES)" type="number" min="0" step="0.01" required value={amount} onChange={(e) => setAmount(e.target.value)} />
         <Input id="txn-date" label="Date" type="date" required value={date} onChange={(e) => setDate(e.target.value)} />
+      </div>
+      <div className="grid grid-cols-2 gap-4">
+        <Select id="txn-farm" label="Sub-farm (optional)" value={farmId} onChange={(e) => setFarmId(e.target.value)}>
+          <option value="">Not specified</option>
+          {farms.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+        </Select>
+        <Select id="txn-activity" label="Activity (optional)" value={activity} onChange={(e) => setActivity(e.target.value)}>
+          <option value="">Not specified</option>
+          {ACTIVITIES.map((a) => <option key={a} value={a}>{a}</option>)}
+        </Select>
       </div>
       <Input id="txn-description" label="Description" value={description} onChange={(e) => setDescription(e.target.value)} />
       <Button type="submit" disabled={pending} className="w-full">

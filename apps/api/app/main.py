@@ -44,6 +44,13 @@ from app.modules.platform_admin.router import router as platform_admin_router
 from app.modules.platform_admin.tenant_crud_router import router as platform_tenant_crud_router
 from app.modules.platform_admin.audit_middleware import PlatformAuditMiddleware
 from app.modules.billing.router import router as billing_router, webhooks_router as billing_webhooks_router
+from app.modules.feedlot.router import router as feedlot_router
+from app.modules.receivables.router import router as receivables_router
+from app.modules.training.router import router as training_router
+from app.modules.groups.router import router as groups_router
+from app.modules.fuel.router import router as fuel_router
+from app.modules.feedback.router import public as feedback_public_router, staff as feedback_staff_router
+from app.modules.livestock.photo import router as animal_photo_router
 
 settings = get_settings()
 
@@ -173,6 +180,14 @@ app.include_router(account_router)
 app.include_router(search_router)
 app.include_router(bulk_import_router)
 app.include_router(media_router)
+app.include_router(feedlot_router)
+app.include_router(receivables_router)
+app.include_router(training_router)
+app.include_router(groups_router)
+app.include_router(fuel_router)
+app.include_router(feedback_public_router)
+app.include_router(feedback_staff_router)
+app.include_router(animal_photo_router)
 app.include_router(inquiries_router)
 app.include_router(inquiries_public_router)
 

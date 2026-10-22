@@ -6,6 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Check, MapPin, MessageCircle, Minus, Plus, ShieldCheck, Truck } from "lucide-react";
 import { ShopHeader } from "@/components/shop-header";
+import { ReviewsSection } from "@/components/shop-reviews";
 import { ProductCard, ProductGallery, SectionHeading } from "@/components/shop-ui";
 import { Button, ErrorState, Input, Select } from "@/components/ui";
 import { apiFetch, ApiError } from "@/lib/api";
@@ -259,6 +260,8 @@ export default function ListingDetailPage() {
                 </ul>
               </aside>
             </div>
+
+            <ReviewsSection orgSlug={orgSlug} slug={slug} />
 
             {related.length > 0 && (
               <section className="mt-14">

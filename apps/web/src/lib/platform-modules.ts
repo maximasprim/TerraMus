@@ -125,7 +125,7 @@ export const PLATFORM_MODULES: ModuleConfig[] = [
     // that function as an actual removal: "archived" and "deceased".
     statusAction: {
       field: "status", label: "Change status (incl. archive)",
-      options: ["active", "for_sale", "reserved", "sold", "transferred", "deceased", "missing", "quarantined", "archived"],
+      options: ["active", "for_sale", "reserved", "sold", "transferred", "deceased", "missing", "quarantined", "archived", "culled"],
       method: "POST", // backend exposes POST (not PATCH) for this route
       path: (org, id) => `/api/v1/platform/organizations/${org}/livestock/${id}/status`,
     },
