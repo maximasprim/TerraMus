@@ -175,12 +175,15 @@ function BudgetEditor({ doc, busy, onSave }: EP) {
   );
 }
 
-type Mode = "manual" | "recipe" | "enterprise_budget" | "blend";
+type Mode = "manual" | "recipe" | "enterprise_budget" | "blend" | "fodder";
 function RationEditor({ doc, all, busy, onSave }: EP & { all: Doc[] }) {
   const d = (doc?.data ?? {}) as { stages?: { label?: string; days: number; feeds?: Record<string, number> }[]; feed_costs?: Record<string, number>;
     cost_links?: Record<string, { kind: Mode; name?: string; names?: string[] }> };
   const budgets = all.filter((x) => x.kind === "enterprise_budget").map((x) => x.name);
   const recipes = all.filter((x) => x.kind === "recipe").map((x) => x.name);
+  // Our own fodder stock, priced at its real average cost (needs the Fodder module; absent or forbidden = just no option)
+  const fodderQ = useQuery<{ name: string }[]>({ queryKey: ["fodder", "products", "names"], retry: false, queryFn: () => apiFetch<{ name: string }[]>("/api/v1/fodder/products?active_only=true") });
+  const fodderNames = fodderQ.data?.map((x) => x.name) ?? [];
   const [name, setName] = useState(doc?.name ?? "");
   const [stages, setStages] = useState((d.stages ?? [{ label: "Stage 1", days: 30, feeds: {} }]).map((s) => ({
     label: s.label ?? "", days: str(s.days), silage: str(s.feeds?.silage ?? 0), hay: str(s.feeds?.hay ?? 0), concentrate: str(s.feeds?.concentrate ?? 0) })));
@@ -214,11 +217,12 @@ function RationEditor({ doc, all, busy, onSave }: EP & { all: Doc[] }) {
           <Select label="Source" value={mode[f]} onChange={(e) => setMode({ ...mode, [f]: e.target.value as Mode })}>
             <option value="manual">A fixed price</option><option value="recipe">A feed recipe</option>
             <option value="enterprise_budget">A fodder budget</option><option value="blend">A blend of fodder budgets</option>
+            {(fodderNames.length > 0 || mode[f] === "fodder") && <option value="fodder">Our fodder stock (actual cost)</option>}
           </Select>
           {mode[f] === "manual" && <Input label="KES per kg" type="number" min="0" step="any" value={manual[f]} onChange={(e) => setManual({ ...manual, [f]: e.target.value })} />}
-          {(mode[f] === "recipe" || mode[f] === "enterprise_budget") && (
+          {(mode[f] === "recipe" || mode[f] === "enterprise_budget" || mode[f] === "fodder") && (
             <Select label="Which" value={pick[f]} onChange={(e) => setPick({ ...pick, [f]: e.target.value })}>
-              <option value="">Choose…</option>{(mode[f] === "recipe" ? recipes : budgets).map((n) => <option key={n} value={n}>{n}</option>)}
+              <option value="">Choose…</option>{(mode[f] === "recipe" ? recipes : mode[f] === "fodder" ? fodderNames : budgets).map((n) => <option key={n} value={n}>{n}</option>)}
             </Select>)}
           {mode[f] === "blend" && (
             <div className="text-xs">{budgets.length === 0 ? "Add fodder budgets first" : budgets.map((n) => (

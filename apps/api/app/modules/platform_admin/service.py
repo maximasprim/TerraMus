@@ -16,7 +16,7 @@ from app.modules.platform_admin import schemas
 
 
 async def authenticate_platform_admin(db: AsyncSession, email: str, password: str) -> str:
-    result = await db.execute(select(PlatformAdmin).where(PlatformAdmin.email == email))
+    result = await db.execute(select(PlatformAdmin).where(func.lower(PlatformAdmin.email) == email.strip().lower()))
     admin = result.scalar_one_or_none()
     if not admin or not admin.is_active or not verify_password(password, admin.password_hash):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid credentials")
@@ -50,7 +50,7 @@ async def list_platform_admins(db: AsyncSession) -> list[PlatformAdmin]:
 
 
 async def create_platform_admin(db: AsyncSession, email: str, full_name: str, password: str, role: str = "superadmin") -> PlatformAdmin:
-    existing = await db.execute(select(PlatformAdmin).where(PlatformAdmin.email == email))
+    existing = await db.execute(select(PlatformAdmin).where(func.lower(PlatformAdmin.email) == email.strip().lower()))
     if existing.scalar_one_or_none():
         raise HTTPException(status.HTTP_409_CONFLICT, "A platform admin with this email already exists")
     admin = PlatformAdmin(email=email, full_name=full_name, password_hash=hash_password(password), role=role)
@@ -199,7 +199,7 @@ async def dashboard_stats(db: AsyncSession) -> schemas.PlatformDashboardStats:
 
 async def request_platform_admin_password_reset(db: AsyncSession, email: str) -> None:
     result = await db.execute(
-        select(PlatformAdmin).where(PlatformAdmin.email == email, PlatformAdmin.is_active.is_(True))
+        select(PlatformAdmin).where(func.lower(PlatformAdmin.email) == email.strip().lower(), PlatformAdmin.is_active.is_(True))
     )
     admin = result.scalar_one_or_none()
     if not admin:

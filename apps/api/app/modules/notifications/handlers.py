@@ -10,27 +10,37 @@ from sqlalchemy import select
 
 from app.core import database as db_module
 from app.core.events import subscribe
+from app.modules.livestock.models import Animal
 from app.modules.notifications.service import notify_users_with_permission, send_email
 
 logger = logging.getLogger("notifications.handlers")
 
 
-async def on_vaccination_due(payload: dict) -> None:
+async def _label(db, org_id: uuid.UUID, animal_id: str) -> str:
+    """'COW-77 (Daisy)' instead of an internal id nobody can recognise."""
+    a = (await db.execute(select(Animal).where(Animal.id == uuid.UUID(animal_id), Animal.organization_id == org_id))).scalar_one_or_none()
+    return "an animal" if not a else a.animal_number + (f" ({a.name})" if a.name else "")
+
+
+async def _follow_up_alert(payload: dict, title: str, what: str) -> None:
+    from app.modules.notifications.scheduled import _mark_sent
+    from datetime import date
+    org_id = uuid.UUID(payload["organization_id"])
     async with db_module.AsyncSessionLocal() as db:
+        label = await _label(db, org_id, payload["animal_id"])
         await notify_users_with_permission(
-            db, uuid.UUID(payload["organization_id"]), "health.read", "health",
-            "Vaccination due", f"Animal {payload['animal_id']} has a vaccination due {payload['due_date']}.",
-            related_entity_type="animal", related_entity_id=uuid.UUID(payload["animal_id"]),
-        )
+            db, org_id, "health.read", "health", title, f"{label} has {what} due {payload['due_date']}.",
+            related_entity_type="animal", related_entity_id=uuid.UUID(payload["animal_id"]))
+        # tell the morning check this was already announced, so it does not send the same news again
+        await _mark_sent(db, org_id, f"followup:{payload['animal_id']}:{payload['due_date']}", date.today())
+
+
+async def on_vaccination_due(payload: dict) -> None:
+    await _follow_up_alert(payload, "Vaccination due", "a vaccination")
 
 
 async def on_health_follow_up_due(payload: dict) -> None:
-    async with db_module.AsyncSessionLocal() as db:
-        await notify_users_with_permission(
-            db, uuid.UUID(payload["organization_id"]), "health.read", "health",
-            "Health follow-up due", f"Animal {payload['animal_id']} has a follow-up due {payload['due_date']}.",
-            related_entity_type="animal", related_entity_id=uuid.UUID(payload["animal_id"]),
-        )
+    await _follow_up_alert(payload, "Health follow-up due", "a follow-up")
 
 
 async def on_inventory_low(payload: dict) -> None:
@@ -106,7 +116,7 @@ async def on_pregnancy_confirmed(payload: dict) -> None:
     async with db_module.AsyncSessionLocal() as db:
         await notify_users_with_permission(
             db, uuid.UUID(payload["organization_id"]), "breeding.read", "breeding",
-            "Pregnancy confirmed", f"Animal {payload['animal_id']} confirmed pregnant"
+            "Pregnancy confirmed", f"{await _label(db, uuid.UUID(payload['organization_id']), payload['animal_id'])} confirmed pregnant"
                                    f"{' - expected ' + payload['expected_delivery_date'] if payload.get('expected_delivery_date') else ''}.",
             related_entity_type="animal", related_entity_id=uuid.UUID(payload["animal_id"]),
         )
@@ -116,7 +126,7 @@ async def on_birth_recorded(payload: dict) -> None:
     async with db_module.AsyncSessionLocal() as db:
         await notify_users_with_permission(
             db, uuid.UUID(payload["organization_id"]), "breeding.read", "breeding",
-            "Birth recorded", f"Animal {payload['dam_id']} gave birth "
+            "Birth recorded", f"{await _label(db, uuid.UUID(payload['organization_id']), payload['dam_id'])} gave birth "
                                f"({len(payload.get('offspring_ids', []))} offspring).",
             related_entity_type="animal", related_entity_id=uuid.UUID(payload["dam_id"]),
         )

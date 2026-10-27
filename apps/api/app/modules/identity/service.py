@@ -4,7 +4,8 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -242,7 +243,7 @@ async def ensure_permission_catalog(db: AsyncSession) -> dict[str, Permission]:
 
 
 async def register_organization(db: AsyncSession, req: schemas.RegisterRequest) -> tuple[Organization, User]:
-    existing = await db.execute(select(User).where(User.email == req.email))
+    existing = await db.execute(select(User).where(func.lower(User.email) == req.email.lower()))
     if existing.scalar_one_or_none():
         raise ValueError("email_already_registered")
 
@@ -269,7 +270,13 @@ async def register_organization(db: AsyncSession, req: schemas.RegisterRequest) 
     )
     owner.roles = [roles_by_name["Farm Owner"]]
     db.add(owner)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:       # two sign-ups for one address at the same instant: the unique index decides
+        await db.rollback()
+        if "email" in str(exc.orig).lower():
+            raise ValueError("email_already_registered") from exc
+        raise
     await db.refresh(owner)
     await db.refresh(org)
     return org, owner
@@ -277,9 +284,9 @@ async def register_organization(db: AsyncSession, req: schemas.RegisterRequest) 
 
 async def authenticate(db: AsyncSession, email: str, password: str) -> User | None:
     result = await db.execute(
-        select(User).options(selectinload(User.roles)).where(User.email == email)
+        select(User).options(selectinload(User.roles)).where(func.lower(User.email) == email.strip().lower())
     )
-    user = result.scalar_one_or_none()
+    user = result.scalars().first()
     if not user or not user.is_active:
         return None
     if not verify_password(password, user.password_hash):
@@ -403,7 +410,7 @@ async def request_password_reset(db: AsyncSession, email: str) -> None:
     mistakes. The router (identity/router.py) always replies with an
     identical generic 'if that email exists, a reset link was sent'
     message no matter what this function actually did internally."""
-    result = await db.execute(select(User).where(User.email == email, User.is_active.is_(True)))
+    result = await db.execute(select(User).where(func.lower(User.email) == email.strip().lower(), User.is_active.is_(True)))
     user = result.scalar_one_or_none()
     if not user:
         return

@@ -43,12 +43,16 @@ PERMISSIONS: list[tuple[str, str]] = [
     ("groups.read", "View flocks / fish / rabbit groups and their records"),
     ("groups.record", "Record daily group data (mortality, eggs, feed, weights)"),
     ("groups.manage", "Create, sell and close flocks / fish / rabbit groups"),
+    ("fodder.read", "View fodder plots, production, stock, costs and reports"),
+    ("fodder.record", "Record fodder harvests, costs, issues, losses and stock counts"),
+    ("fodder.manage", "Manage fodder products, prices, plots, cycles, investments, purchases and sales"),
 ]
 
 # Default role -> permission grants used by org bootstrap/seed data (spec §5, §61).
 DEFAULT_ROLE_GRANTS: dict[str, list[str]] = {
     "Farm Owner": [code for code, _ in PERMISSIONS],  # full access within the org
     "Farm Manager": [
+        "fodder.read", "fodder.record", "fodder.manage",
         "training.read", "training.manage", "groups.read", "groups.record", "groups.manage",
         "feedlot.read", "feedlot.weigh", "feedlot.manage",
         "livestock.read", "livestock.create", "livestock.update", "livestock.sell",
@@ -59,6 +63,7 @@ DEFAULT_ROLE_GRANTS: dict[str, list[str]] = {
         "employees.manage", "assets.manage", "search.use",
     ],
     "Livestock Manager": [
+        "fodder.read", "fodder.record",
         "groups.read", "groups.record", "groups.manage",
         "feedlot.read", "feedlot.weigh", "feedlot.manage",
         "livestock.read", "livestock.create", "livestock.update",
@@ -69,11 +74,13 @@ DEFAULT_ROLE_GRANTS: dict[str, list[str]] = {
         "livestock.read", "listings.manage", "orders.manage",
     ],
     "Veterinarian": [
+        "fodder.read",
         "groups.read",
         "feedlot.read",
         "livestock.read", "health.read", "health.create", "breeding.read", "reports.view", "search.use",
     ],
     "Farm Worker": [
+        "fodder.read", "fodder.record",
         "groups.read", "groups.record",
         "feedlot.read", "feedlot.weigh",
         "livestock.read", "health.create", "dairy.create", "crops.read", "crops.harvest", "search.use",
@@ -82,11 +89,13 @@ DEFAULT_ROLE_GRANTS: dict[str, list[str]] = {
         "inventory.read", "inventory.adjust", "procurement.manage", "reports.view", "assets.manage", "search.use",
     ],
     "Accountant": [
+        "fodder.read",
         "training.read", "groups.read",
         "feedlot.read",
         "finance.read", "finance.create", "payments.manage", "reports.view", "search.use",
     ],
     "Sales Manager": [
+        "fodder.read",
         "training.read", "training.manage",
         "feedlot.read",
         "livestock.read", "livestock.sell", "orders.manage", "listings.manage", "customers.manage",

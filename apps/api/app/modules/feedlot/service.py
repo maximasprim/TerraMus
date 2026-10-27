@@ -405,7 +405,7 @@ def _validate_doc(kind: str, data: dict) -> None:
         need("lines", list)
 
 
-def _compute(doc: CostingDocument, by_kind: dict[str, list[CostingDocument]]) -> dict | None:
+def _compute(doc: CostingDocument, by_kind: dict[str, list[CostingDocument]], fodder: dict[str, float] | None = None) -> dict | None:
     if doc.kind == "recipe":
         return metrics.recipe_cost(doc.data)
     if doc.kind == "enterprise_budget":
@@ -414,7 +414,7 @@ def _compute(doc: CostingDocument, by_kind: dict[str, list[CostingDocument]]) ->
         return metrics.overhead_totals(doc.data)
     if doc.kind == "ration_plan":
         costs = metrics.resolve_feed_costs(doc.data, {d.name: d.data for d in by_kind.get("enterprise_budget", [])},
-                                           {d.name: d.data for d in by_kind.get("recipe", [])})
+                                           {d.name: d.data for d in by_kind.get("recipe", [])}, fodder)
         stages = doc.data.get("stages", [])
         per_day = [round(metrics.ration_stage_cost_per_day(st, costs), 4) for st in stages]
         total_days = sum(int(metrics._f(st.get("days"))) for st in stages)
@@ -424,15 +424,25 @@ def _compute(doc: CostingDocument, by_kind: dict[str, list[CostingDocument]]) ->
     return None
 
 
+async def _fodder_costs(db, org_id) -> dict[str, float]:
+    """Average cost per kg of our own fodder stock, by product name (empty if the fodder module has nothing yet)."""
+    try:
+        from app.modules.fodder.service import cost_map
+    except ImportError:
+        return {}
+    return await cost_map(db, org_id)
+
+
 async def list_costing_docs(db, org_id, kind: str | None = None) -> list[schemas.CostingDocumentOut]:
     by_kind = await _docs_by_kind(db, org_id)
+    fodder = await _fodder_costs(db, org_id)
     out = []
     for k, docs in by_kind.items():
         if kind and k != kind:
             continue
         for d in docs:
             o = schemas.CostingDocumentOut.model_validate(d)
-            o.computed = _compute(d, by_kind)
+            o.computed = _compute(d, by_kind, fodder)
             out.append(o)
     return out
 
@@ -470,7 +480,7 @@ async def create_costing_doc(db, org_id, req: schemas.CostingDocumentCreate) -> 
     await db.commit()
     await db.refresh(d)
     o = schemas.CostingDocumentOut.model_validate(d)
-    o.computed = _compute(d, await _docs_by_kind(db, org_id))
+    o.computed = _compute(d, await _docs_by_kind(db, org_id), await _fodder_costs(db, org_id))
     return o
 
 
@@ -484,7 +494,7 @@ async def update_costing_doc(db, org_id, doc_id, req: schemas.CostingDocumentUpd
     await db.commit()
     await db.refresh(d)
     o = schemas.CostingDocumentOut.model_validate(d)
-    o.computed = _compute(d, await _docs_by_kind(db, org_id))
+    o.computed = _compute(d, await _docs_by_kind(db, org_id), await _fodder_costs(db, org_id))
     return o
 
 
@@ -583,7 +593,7 @@ async def profitability(db, org_id, as_of: date | None = None, intake_batch_id=N
     pool = by_kind["overhead_pool"][0] if by_kind.get("overhead_pool") else None
     stages = plan.data.get("stages", []) if plan else []
     feed_costs = metrics.resolve_feed_costs(plan.data, {d.name: d.data for d in by_kind.get("enterprise_budget", [])},
-                                            {d.name: d.data for d in by_kind.get("recipe", [])}) if plan else {}
+                                            {d.name: d.data for d in by_kind.get("recipe", [])}, await _fodder_costs(db, org_id)) if plan else {}
     pool_total = metrics.overhead_totals(pool.data)["total"] if pool else 0.0
 
     loaded = await _load(db, org_id)

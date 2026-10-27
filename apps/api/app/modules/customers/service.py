@@ -1,7 +1,7 @@
 import uuid
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.customers.models import Customer
@@ -57,9 +57,10 @@ async def find_or_create_by_contact(
     customer login: match an existing CRM record by email/phone, or create one."""
     if email:
         existing = await db.execute(
-            select(Customer).where(Customer.organization_id == org_id, Customer.email == email)
+            select(Customer).where(Customer.organization_id == org_id, func.lower(Customer.email) == email.strip().lower())
+            .order_by(Customer.created_at)          # the same address may legitimately be on several CRM rows: use the oldest
         )
-        found = existing.scalar_one_or_none()
+        found = existing.scalars().first()
         if found:
             return found
     customer = Customer(organization_id=org_id, name=name, email=email, phone=phone, customer_type="individual")

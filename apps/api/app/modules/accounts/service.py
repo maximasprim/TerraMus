@@ -1,7 +1,8 @@
 import uuid
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import hash_password
@@ -19,7 +20,7 @@ async def register_customer_account(db: AsyncSession, org_id: uuid.UUID, req: sc
     guest checkout already reuses) so a customer who previously checked out
     as a guest with this email gets their existing order history linked to
     the new login, rather than a disconnected duplicate CRM record."""
-    existing = await db.execute(select(User).where(User.email == req.email))
+    existing = await db.execute(select(User).where(func.lower(User.email) == req.email.lower()))
     if existing.scalar_one_or_none():
         raise ValueError("email_already_registered")
 
@@ -42,7 +43,13 @@ async def register_customer_account(db: AsyncSession, org_id: uuid.UUID, req: sc
         password_hash=hash_password(req.password), customer_id=customer.id, roles=[customer_role],
     )
     db.add(user)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:       # same address registered twice at the same instant
+        await db.rollback()
+        if "email" in str(exc.orig).lower():
+            raise ValueError("email_already_registered") from exc
+        raise
     await db.refresh(user)
     return user
 

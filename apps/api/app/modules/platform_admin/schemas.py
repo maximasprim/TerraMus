@@ -1,7 +1,8 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, EmailStr, Field
+from app.core.emailnorm import NormalizedEmail
+from pydantic import BaseModel, Field
 
 
 # Platform admins can see and change every tenant, so their passwords get a
@@ -12,7 +13,7 @@ PLATFORM_PASSWORD_MAX = 72
 
 
 class PlatformAdminLoginRequest(BaseModel):
-    email: EmailStr
+    email: NormalizedEmail
     password: str
 
 
@@ -58,7 +59,7 @@ class OrganizationStatusUpdate(BaseModel):
 
 
 class PlatformAdminCreateRequest(BaseModel):
-    email: EmailStr
+    email: NormalizedEmail
     full_name: str
     # no minimum on LOGIN (existing admins keep working); enforced when a password is SET
     password: str = Field(min_length=PLATFORM_PASSWORD_MIN, max_length=PLATFORM_PASSWORD_MAX)
@@ -74,7 +75,7 @@ class PlatformAdminRoleUpdate(BaseModel):
 
 
 class PlatformAdminPasswordResetRequest(BaseModel):
-    email: EmailStr
+    email: NormalizedEmail
 
 
 class PlatformAdminPasswordResetConfirm(BaseModel):

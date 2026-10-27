@@ -25,6 +25,12 @@ class ScheduledChecksResult(BaseModel):
     vaccinations_due_notified: int
     low_stock_notified: int
     reservations_expired: int
+    feedlot_unweighed_notified: int = 0
+    feedlot_market_ready_notified: int = 0
+    receivables_notified: int = 0
+    payments_review_notified: int = 0
+    training_notified: int = 0
+    fodder_notified: int = 0
 
 
 class EmailOutboxOut(BaseModel):

@@ -81,8 +81,17 @@ class Settings(BaseSettings):
     DARAJA_CONSUMER_SECRET: str = ""
     DARAJA_SHORTCODE: str = ""
     DARAJA_PASSKEY: str = ""
+    # "sandbox" or "production". Chooses Safaricom's host; a sandbox host in production silently sends
+    # test prompts that never move real money, so a production-like deployment on sandbox is warned about.
+    DARAJA_ENV: str = "sandbox"
+    DARAJA_BASE_URL: str = ""          # optional full override (e.g. a gateway or a recorded-traffic test double)
+    # The PUBLIC address of POST /api/v1/payments/webhooks/mpesa (no secret in it). The shared secret below is
+    # appended as the last path segment automatically, because Safaricom cannot send custom headers.
     DARAJA_CALLBACK_URL: str = ""
-    DARAJA_CALLBACK_SHARED_SECRET: str = ""
+    DARAJA_CALLBACK_SHARED_SECRET: str = ""   # URL-safe: letters, digits, '-' and '_' only, 24+ characters
+    PAYMENT_RECONCILE_INTERVAL_SECONDS: int = 300
+    SCHEDULER_ENABLED: bool = True
+    SCHEDULER_RUN_HOUR: int = 6        # local hour (DEFAULT_TIMEZONE) at which the daily alert checks run
 
     STRIPE_SECRET_KEY: str = ""
     STRIPE_WEBHOOK_SECRET: str = ""

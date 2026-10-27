@@ -1,7 +1,8 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -104,7 +105,7 @@ async def create_user(
 ):
     from app.core.security import hash_password
 
-    existing = await db.execute(select(User).where(User.email == req.email))
+    existing = await db.execute(select(User).where(func.lower(User.email) == req.email.lower()))
     if existing.scalar_one_or_none():
         raise HTTPException(status.HTTP_409_CONFLICT, "Email already registered")
 
@@ -130,7 +131,13 @@ async def create_user(
         roles=roles,
     )
     db.add(new_user)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        if "email" in str(exc.orig).lower():
+            raise HTTPException(status.HTTP_409_CONFLICT, "Email already registered") from exc
+        raise
     await db.refresh(new_user)
     return new_user
 

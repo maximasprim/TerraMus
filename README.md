@@ -710,3 +710,7 @@ product reviews and animal photos. Migrations 0029-0031 (additive). See
 [`docs/FEEDLOT_AND_OPERATIONS.md`](docs/FEEDLOT_AND_OPERATIONS.md) for the design, the worksheet-to-system mapping, the
 corrections made to the manual calculations, and what is still open.
 
+Also added: fodder production (cost of production with amortisation, stock, days of cover), a daily alert scheduler,
+M-Pesa hardening (secret in the callback URL, amount/receipt checks, a review state, reconciliation) and case-insensitive emails.
+See sections 7-9 of the document above.
+

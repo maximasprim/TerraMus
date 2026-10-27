@@ -2,7 +2,8 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from app.core.emailnorm import NormalizedEmail
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CustomerRegisterRequest(BaseModel):
@@ -11,7 +12,7 @@ class CustomerRegisterRequest(BaseModel):
     like every other endpoint in modules/public (never trust a client-
     supplied tenant id, spec §52.13)."""
     full_name: str = Field(min_length=1, max_length=255)
-    email: EmailStr
+    email: NormalizedEmail
     phone: str | None = None
     password: str = Field(min_length=8, max_length=128)
 

@@ -2,7 +2,8 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, EmailStr, ConfigDict, Field, field_validator
+from app.core.emailnorm import NormalizedEmail
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class OrganizationOut(BaseModel):
@@ -41,13 +42,13 @@ class OrganizationSettingsUpdate(BaseModel):
 class RegisterRequest(BaseModel):
     organization_name: str = Field(min_length=2, max_length=255)
     full_name: str = Field(min_length=2, max_length=255)
-    email: EmailStr
+    email: NormalizedEmail
     phone: str | None = None
     password: str = Field(min_length=8, max_length=128)
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    email: NormalizedEmail
     password: str
 
 
@@ -71,7 +72,7 @@ class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
     organization_id: uuid.UUID
-    email: EmailStr
+    email: NormalizedEmail
     full_name: str
     phone: str | None
     is_active: bool
@@ -87,7 +88,7 @@ class MeResponse(BaseModel):
 
 class CreateUserRequest(BaseModel):
     full_name: str = Field(min_length=2, max_length=255)
-    email: EmailStr
+    email: NormalizedEmail
     phone: str | None = None
     password: str = Field(min_length=8, max_length=128)
     role_ids: list[uuid.UUID] = []
@@ -111,7 +112,7 @@ class AuditLogOut(BaseModel):
 
 
 class PasswordResetRequest(BaseModel):
-    email: EmailStr
+    email: NormalizedEmail
 
 
 class PasswordResetConfirm(BaseModel):

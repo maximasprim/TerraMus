@@ -220,7 +220,7 @@ def animal_profit(perf: dict[str, Any], a: AnimalInput, feed_cost: float, ops_co
     return out
 
 
-def resolve_feed_costs(plan_data: dict, budgets: dict[str, dict], recipes: dict[str, dict]) -> dict[str, float]:
+def resolve_feed_costs(plan_data: dict, budgets: dict[str, dict], recipes: dict[str, dict], fodder: dict[str, float] | None = None) -> dict[str, float]:
     """Per-kg cost of each ration feed: manual `feed_costs`, overridden by live
     `cost_links` into recipes / enterprise budgets / acre-weighted silage blends."""
     costs = {k: _f(v) for k, v in (plan_data.get("feed_costs") or {}).items()}
@@ -231,6 +231,8 @@ def resolve_feed_costs(plan_data: dict, budgets: dict[str, dict], recipes: dict[
         elif kind == "enterprise_budget" and link.get("name") in budgets:
             c = budget_cost(budgets[link["name"]])
             costs[feed] = c["cost_per_kg"] if c["cost_per_kg"] is not None else c["cost_per_unit"]
+        elif kind == "fodder" and link.get("name") in (fodder or {}):     # the live average cost of our own stock
+            costs[feed] = fodder[link["name"]]
         elif kind == "blend":
             costs[feed] = blend_cost_per_kg([budgets[n] for n in link.get("names", []) if n in budgets])
     return costs

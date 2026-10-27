@@ -61,6 +61,16 @@ async def mpesa_webhook(request: Request, db: AsyncSession = Depends(get_db)):
     return await service.handle_webhook(db, "mpesa", dict(request.headers), body)
 
 
+@webhooks_router.post("/mpesa/{secret}")
+async def mpesa_webhook_with_secret(secret: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """The address registered with Safaricom. Daraja cannot send custom headers, so the shared secret is the last
+    path segment of the callback URL; it is handed to the provider as the credential (overriding any header)."""
+    body = await request.body()
+    headers = dict(request.headers)
+    headers["x-callback-secret"] = secret
+    return await service.handle_webhook(db, "mpesa", headers, body)
+
+
 @webhooks_router.post("/stripe")
 async def stripe_webhook(request: Request, db: AsyncSession = Depends(get_db)):
     body = await request.body()

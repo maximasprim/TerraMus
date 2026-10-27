@@ -49,6 +49,24 @@ def mock_payments_enabled(env: str, allow_mock: bool | None, mock_secret: str) -
     )
 
 
+def daraja_warnings(env: str, daraja_env: str, consumer_key: str, callback_url: str, callback_secret: str) -> list[str]:
+    """Warnings for a production-like deployment that has M-Pesa credentials configured. Nothing is reported when
+    no Daraja credentials are set (M-Pesa is simply not in use)."""
+    import re
+    if not is_production_like(env) or not consumer_key:
+        return []
+    out: list[str] = []
+    if (daraja_env or "").strip().lower() != "production":
+        out.append("DARAJA_ENV is not 'production': STK prompts go to Safaricom's SANDBOX and no real money moves. "
+                   "Set DARAJA_ENV=production with live credentials.")
+    if not callback_url.lower().startswith("https://"):
+        out.append("DARAJA_CALLBACK_URL is not an https:// address. Safaricom will not deliver payment confirmations to it.")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{24,}", callback_secret or ""):
+        out.append("DARAJA_CALLBACK_SHARED_SECRET is missing, shorter than 24 characters, or has characters that are not "
+                   "URL-safe. Payment confirmations will be refused. Use 24+ letters, digits, '-' or '_'.")
+    return out
+
+
 def security_warnings(env: str, jwt_secret: str, mock_secret: str, allow_mock: bool | None) -> list[str]:
     """Human-readable startup warnings. Deliberately warnings, not exceptions:
     refusing to boot could take down an existing deployment, whereas a loud

@@ -2,7 +2,8 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from app.core.emailnorm import NormalizedEmail
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class PublicListingImageOut(BaseModel):
@@ -125,7 +126,7 @@ class PublicOrderItemRequest(BaseModel):
 
 class PublicOrderCreate(BaseModel):
     customer_name: str = Field(min_length=1, max_length=255)
-    customer_email: EmailStr
+    customer_email: NormalizedEmail
     customer_phone: str | None = None
     items: list[PublicOrderItemRequest] = Field(min_length=1)
     delivery_option: str = Field(default="pickup", pattern="^(pickup|delivery)$")
@@ -160,7 +161,7 @@ class PaymentMethodsOut(BaseModel):
 
 class PublicPaymentRequest(BaseModel):
     phone_or_token: str
-    email: EmailStr  # lightweight ownership check - must match the order's customer
+    email: NormalizedEmail  # lightweight ownership check - must match the order's customer
 
 
 class PublicBannerOut(BaseModel):

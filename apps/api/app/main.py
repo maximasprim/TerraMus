@@ -9,7 +9,7 @@ from sqlalchemy import text
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.core.middleware import RequestContextMiddleware, SecurityHeadersMiddleware
-from app.core.security_checks import security_warnings
+from app.core.security_checks import daraja_warnings, security_warnings
 from app.modules.commerce.storage import config_from_settings as storage_config, config_warning as storage_warning
 from app.core.observability import PrometheusMiddleware, register_metrics_endpoint, setup_tracing
 from app.modules.identity.router import router as auth_router, users_router, audit_router, organization_router
@@ -46,6 +46,8 @@ from app.modules.platform_admin.audit_middleware import PlatformAuditMiddleware
 from app.modules.billing.router import router as billing_router, webhooks_router as billing_webhooks_router
 from app.modules.feedlot.router import router as feedlot_router
 from app.modules.receivables.router import router as receivables_router
+from app.modules.scheduler.router import router as scheduler_router
+from app.modules.fodder.router import router as fodder_router
 from app.modules.training.router import router as training_router
 from app.modules.groups.router import router as groups_router
 from app.modules.fuel.router import router as fuel_router
@@ -62,6 +64,12 @@ logging.basicConfig(
 # Loud (but non-fatal) startup warnings for insecure production-like config.
 for _warning in security_warnings(
     settings.ENV, settings.JWT_SECRET, settings.MOCK_PAYMENT_SECRET, settings.ALLOW_MOCK_PAYMENTS,
+):
+    logging.getLogger("app.security").warning(_warning)
+
+for _warning in daraja_warnings(
+    settings.ENV, settings.DARAJA_ENV, settings.DARAJA_CONSUMER_KEY, settings.DARAJA_CALLBACK_URL,
+    settings.DARAJA_CALLBACK_SHARED_SECRET,
 ):
     logging.getLogger("app.security").warning(_warning)
 
@@ -107,9 +115,17 @@ async def lifespan(app: FastAPI):
 
     task = asyncio.create_task(_lifecycle_loop())
     order_task = asyncio.create_task(_order_expiry_loop())
+    extra_tasks = []
+    if settings.SCHEDULER_ENABLED:
+        # Daily alert checks (vaccinations, stock, weighing, receivables, training, fodder) and M-Pesa reconciliation.
+        from app.modules.scheduler.runner import daily_checks_loop, payment_reconcile_loop
+        extra_tasks = [asyncio.create_task(daily_checks_loop(AsyncSessionLocal)),
+                       asyncio.create_task(payment_reconcile_loop(AsyncSessionLocal))]
     yield
     task.cancel()
     order_task.cancel()
+    for t in extra_tasks:
+        t.cancel()
 
 
 app = FastAPI(
@@ -182,6 +198,8 @@ app.include_router(bulk_import_router)
 app.include_router(media_router)
 app.include_router(feedlot_router)
 app.include_router(receivables_router)
+app.include_router(scheduler_router)
+app.include_router(fodder_router)
 app.include_router(training_router)
 app.include_router(groups_router)
 app.include_router(fuel_router)

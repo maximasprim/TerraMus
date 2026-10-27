@@ -23,6 +23,11 @@ class WebhookResult:
     event_id: str  # provider's own idempotency key for this specific callback
     status: str  # "successful" | "failed" | "pending"
     raw_payload: dict[str, Any]
+    # Optional settlement details (M-Pesa supplies them; mock/Stripe leave them empty).
+    amount: Decimal | None = None   # what the payer was actually charged
+    receipt: str | None = None      # provider receipt, e.g. M-Pesa "NLJ7RT61SV"
+    payer: str | None = None        # payer's phone number
+    detail: str | None = None       # provider's human-readable result text
 
 
 class PaymentProvider(abc.ABC):
@@ -36,6 +41,11 @@ class PaymentProvider(abc.ABC):
         creates a PaymentIntent. Must NOT mark anything as paid - only the
         webhook/callback path (verify_and_parse_webhook) can do that (spec
         §20/§65.10: never trust client-reported payment status)."""
+
+    async def query_status(self, provider_reference: str) -> "WebhookResult | None":
+        """Ask the provider what became of a payment whose callback never arrived. None = not supported,
+        or the provider says it is still processing. Optional: providers without it simply do not reconcile."""
+        return None
 
     @abc.abstractmethod
     def verify_and_parse_webhook(self, headers: dict[str, str], body: bytes) -> WebhookResult:

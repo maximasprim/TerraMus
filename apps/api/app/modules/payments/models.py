@@ -8,7 +8,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base, UUIDPKMixin, TimestampMixin
 
 PAYMENT_PROVIDERS = ("mock", "mpesa", "stripe")
-PAYMENT_STATUSES = ("initiated", "pending", "successful", "failed", "cancelled", "refunded", "partially_refunded")
+PAYMENT_STATUSES = ("initiated", "pending", "successful", "failed", "cancelled", "refunded", "partially_refunded",
+                    "needs_review")  # money may have moved but the order could not be settled: a person must decide
 
 
 class Payment(Base, UUIDPKMixin, TimestampMixin):
