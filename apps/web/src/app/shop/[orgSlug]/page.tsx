@@ -85,14 +85,14 @@ export default function ShopHomePage() {
       )}
 
       {categories.length > 0 && (
-        <section className={`${WRAP} py-10`}>
+        <section className={`${WRAP} py-6`}>
           <SectionHeading title="Shop by category" subtitle="Find exactly what you need" href={shopPath(orgSlug, "/store")} linkText="Browse everything" />
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
             {categories.map((c) => (
               <Link
                 key={`${c.kind}:${c.key}`}
                 href={shopPath(orgSlug, `/store?kind=${c.kind}&category=${encodeURIComponent(c.key)}`)}
-                className="group flex flex-col items-center gap-2 rounded-lg border border-hairline bg-white p-4 text-center transition-shadow hover:shadow-md"
+                className="group flex flex-col items-center gap-2 rounded-2xl border border-hairline bg-white p-4 text-center transition-shadow hover:shadow-md"
               >
                 <span
                   className={`flex h-16 w-16 items-center justify-center rounded-full ${
@@ -251,7 +251,7 @@ function Hero({
             that suits you.
           </p>
           <div className="mt-2 flex flex-wrap gap-3">
-            <Link href={shopPath(orgSlug, "/store")} className="rounded-md bg-brass px-6 py-3 text-sm font-semibold text-ink hover:bg-brass/90">
+            <Link href={shopPath(orgSlug, "/store")} className="rounded-lg bg-brass px-6 py-3 text-sm font-semibold text-ink hover:bg-brass/90">
               Shop now
             </Link>
             {active?.link_url ? (
@@ -259,7 +259,7 @@ function Hero({
                 Learn more
               </a>
             ) : (
-              <Link href={shopPath(orgSlug, "/about")} className="rounded-md border border-paper/60 px-6 py-3 text-sm font-medium hover:bg-paper/10">
+              <Link href={shopPath(orgSlug, "/about")} className="rounded-lg border border-paper/60 px-6 py-3 text-sm font-medium hover:bg-paper/10">
                 Our story
               </Link>
             )}
@@ -391,7 +391,7 @@ function ProductRow({
   tinted?: boolean;
 }) {
   return (
-    <section className={tinted ? "border-y border-hairline bg-white/50 py-10" : "py-10"}>
+    <section className={tinted ? "border-y border-hairline bg-white/50 py-8" : "py-6"}>
       <div className={WRAP}>
         <SectionHeading title={title} subtitle={subtitle} href={href} />
         <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">

@@ -1,7 +1,8 @@
 import csv
 import io
+import uuid
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,6 +41,19 @@ async def profitability(
     db: AsyncSession = Depends(get_db),
 ):
     return await service.profitability_report(db, user.organization_id)
+
+
+@router.get("/profitability/animals/{animal_id}", response_model=schemas.AnimalProfitabilityBreakdown)
+async def animal_profitability(
+    animal_id: uuid.UUID,
+    user: User = Depends(require_permission("reports.view")),
+    db: AsyncSession = Depends(get_db),
+):
+    """One animal line by line: what was used, what came back (or was lost)."""
+    breakdown = await service.animal_profitability_breakdown(db, user.organization_id, animal_id)
+    if breakdown is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Animal not found")
+    return breakdown
 
 
 @router.get("/export/livestock.csv")

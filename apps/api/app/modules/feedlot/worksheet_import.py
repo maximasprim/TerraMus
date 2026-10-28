@@ -40,7 +40,7 @@ class _Abort(Exception):
 
 async def import_worksheet(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, content: bytes, *,
                            farm_id: uuid.UUID | None = None, dry_run: bool = True,
-                           include_costing: bool = True) -> dict:
+                           include_costing: bool = True, post_to_finance: bool = True) -> dict:
     try:
         pw = parse_workbook(content)
     except ValueError as e:
@@ -55,7 +55,7 @@ async def import_worksheet(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UU
                     "warnings": list(pw.warnings), "errors": [], "date_corrections": pw.date_corrections,
                     "reconciliation": {}}
     try:
-        await _apply(db, org_id, user_id, pw, farm_id, include_costing, report)
+        await _apply(db, org_id, user_id, pw, farm_id, include_costing, report, post_to_finance)
         if dry_run:
             await db.rollback()
         else:
@@ -78,7 +78,7 @@ async def import_worksheet(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UU
     return report
 
 
-async def _apply(db, org_id, user_id, pw: ParsedWorkbook, farm_id, include_costing, report) -> None:
+async def _apply(db, org_id, user_id, pw: ParsedWorkbook, farm_id, include_costing, report, post_to_finance=True) -> None:
     def warn(code, where, msg, **kw):
         report["warnings"].append({"code": code, "where": where, "message": msg, **kw})
 
@@ -204,6 +204,9 @@ async def _apply(db, org_id, user_id, pw: ParsedWorkbook, farm_id, include_costi
     from app.modules.billing.service import check_animal_limit
     link_rows = {fa.animal_id: fa for fa in (await db.execute(select(FeedlotAnimal).where(FeedlotAnimal.organization_id == org_id))).scalars()}
     sb_by_num = {**existing_sb, **sale_batches}
+    from app.modules.feedlot import ledger_sync
+    acq_recorded = await ledger_sync._recorded_acquisition_ids(db, org_id) if post_to_finance else set()
+    unbooked_sales: list[str] = []
     for tag, p in sorted(plan.items()):
         b: IntakeBatch = p["batch"]
         animal = ex_animals.get(tag)
@@ -222,6 +225,9 @@ async def _apply(db, org_id, user_id, pw: ParsedWorkbook, farm_id, include_costi
             db.add(AnimalEvent(animal_id=animal.id, event_type="acquired", event_at=_utc(p["received_on"]), recorded_by=user_id,
                                data={"acquisition_method": "purchased", "imported": True}))
             report["created"]["animals"] += 1
+            if post_to_finance and await ledger_sync.post_acquisition(
+                    db, org_id, user_id, animal, p["received_on"], acq_recorded) == "posted":
+                report["created"]["finance_purchases"] += 1
         else:
             report["unchanged"]["animals"] += 1
         fa = link_rows.get(animal.id)
@@ -254,11 +260,19 @@ async def _apply(db, org_id, user_id, pw: ParsedWorkbook, farm_id, include_costi
                 sb = sb_by_num.get(ex["sale_batch"])
                 price = sb.price_per_kg if sb and sb.price_per_kg else None
                 amount = metrics.q2(D(ex["sale_weight"]) * D(price)) if price else D(0)
-                db.add(FeedlotExit(organization_id=org_id, animal_id=animal.id, exit_type="sold", exit_date=ex["sold_on"],
-                                   sale_batch_id=sb.id if sb else None, exit_weight_kg=D(ex["sale_weight"]),
-                                   price_per_kg=price, amount=amount, created_by=user_id))
+                new_exit = FeedlotExit(organization_id=org_id, animal_id=animal.id, exit_type="sold", exit_date=ex["sold_on"],
+                                       sale_batch_id=sb.id if sb else None, exit_weight_kg=D(ex["sale_weight"]),
+                                       price_per_kg=price, amount=amount, created_by=user_id)
+                db.add(new_exit)
                 animal.status = "sold"
                 report["created"]["sales"] += 1
+                if post_to_finance:
+                    await db.flush()
+                    outcome = await ledger_sync.post_sale(db, org_id, user_id, new_exit, animal)
+                    if outcome == "posted":
+                        report["created"]["finance_sales"] += 1
+                    elif outcome == "no_price":
+                        unbooked_sales.append(tag)
             else:
                 last = max((d for d, _ in p["weights"]), default=p["received_on"])
                 db.add(FeedlotExit(organization_id=org_id, animal_id=animal.id, exit_type="culled", exit_date=last,
@@ -269,6 +283,10 @@ async def _apply(db, org_id, user_id, pw: ParsedWorkbook, farm_id, include_costi
         elif ex and has_exit:
             report["unchanged"]["exits"] += 1
     await db.flush()
+    if unbooked_sales:
+        warn("sales_not_in_finance", "Finance",
+             f"{len(unbooked_sales)} sale(s) have no price per kg, so they were saved but NOT recorded in Finance "
+             f"(set the sale batch price, then use 'Sync to Finance'): {unbooked_sales[:12]}")
 
     # ---------------------------------------------------------- reconciliation
     sold_tags, culled = set(exits) - {t for t, e in exits.items() if e["type"] == "culled"}, {t for t, e in exits.items() if e["type"] == "culled"}

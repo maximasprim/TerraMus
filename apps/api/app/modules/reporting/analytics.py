@@ -21,6 +21,7 @@ from app.core.timeseries import key_of, month_keys, month_start
 from app.modules.commerce.models import Order
 from app.modules.crops.models import INACTIVE_PLANTING_STATUSES, CropPlanting, HarvestRecord
 from app.modules.dairy.models import MilkProductionRecord
+from app.modules.feedlot.models import FeedlotAnimal, FeedlotExit
 from app.modules.finance.models import FinanceTransaction
 from app.modules.health.models import HealthRecord
 from app.modules.identity.models import Organization
@@ -139,9 +140,53 @@ async def _sales(db, org_id, tz: str, keys: list[str], start: date, end: date) -
         .group_by(Payment.provider).order_by(func.sum(Payment.amount).desc())
     )).all()
 
+    # Animals sold outside the web shop (recorded in the feedlot, by hand or by worksheet import).
+    # Counted by sale date from the feedlot's own records, so this does not depend on Finance sync.
+    fl_head = {k: 0 for k in keys}
+    fl_revenue = {k: ZERO for k in keys}
+    fl_year = func.extract("year", FeedlotExit.exit_date)
+    fl_month = func.extract("month", FeedlotExit.exit_date)
+    fl_rows = (await db.execute(
+        select(fl_year, fl_month, func.count(FeedlotExit.id), func.coalesce(func.sum(FeedlotExit.amount), 0))
+        .where(FeedlotExit.organization_id == org_id, FeedlotExit.exit_type == "sold", FeedlotExit.amount > 0,
+               FeedlotExit.exit_date >= start, FeedlotExit.exit_date <= end)
+        .group_by(fl_year, fl_month)
+    )).all()
+    for y, m, count, total in fl_rows:
+        k = key_of(y, m)
+        if k in fl_head:
+            fl_head[k] += count
+            fl_revenue[k] += Decimal(total)
+    feedlot_head, feedlot_revenue = sum(fl_head.values()), sum(fl_revenue.values(), ZERO)
+
+    # What was spent buying those bulls: landed cost per head (the same figure Finance books as the
+    # purchase expense and the profitability report counts as cost), bucketed by delivery date.
+    fp_head = {k: 0 for k in keys}
+    fp_cost = {k: ZERO for k in keys}
+    fp_year = func.extract("year", FeedlotAnimal.received_on)
+    fp_month = func.extract("month", FeedlotAnimal.received_on)
+    fp_rows = (await db.execute(
+        select(fp_year, fp_month, func.count(FeedlotAnimal.id), func.coalesce(func.sum(Animal.acquisition_cost), 0))
+        .join(Animal, Animal.id == FeedlotAnimal.animal_id)
+        .where(FeedlotAnimal.organization_id == org_id, Animal.acquisition_cost > 0,
+               FeedlotAnimal.received_on >= start, FeedlotAnimal.received_on <= end)
+        .group_by(fp_year, fp_month)
+    )).all()
+    for y, m, count, total in fp_rows:
+        k = key_of(y, m)
+        if k in fp_head:
+            fp_head[k] += count
+            fp_cost[k] += Decimal(total)
+    purchase_head, purchase_cost = sum(fp_head.values()), sum(fp_cost.values(), ZERO)
+
     total_orders, total_revenue = sum(orders.values()), sum(revenue.values(), ZERO)
     return s.SalesAnalytics(
-        monthly=[s.MonthlySales(month=k, orders=orders[k], revenue=_money(revenue[k])) for k in keys],
+        monthly=[s.MonthlySales(month=k, orders=orders[k], revenue=_money(revenue[k]),
+                                feedlot_head=fl_head[k], feedlot_revenue=_money(fl_revenue[k]),
+                                feedlot_purchase_head=fp_head[k], feedlot_purchases=_money(fp_cost[k])) for k in keys],
+        feedlot_head=feedlot_head, feedlot_revenue=_money(feedlot_revenue),
+        combined_revenue=_money(total_revenue + feedlot_revenue),
+        feedlot_purchase_head=purchase_head, feedlot_purchases=_money(purchase_cost),
         orders_by_status=[s.LabelCount(key=k, count=c) for k, c in status_rows],
         payments_by_provider=[s.ProviderTotal(key=p, amount=_money(a), count=c) for p, a, c in provider_rows],
         total_orders=total_orders, total_revenue=_money(total_revenue),

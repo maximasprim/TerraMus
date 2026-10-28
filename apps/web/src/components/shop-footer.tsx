@@ -13,7 +13,7 @@ export function ShopFooter({ orgSlug }: { orgSlug: string }) {
 
   return (
     <footer className="mt-12 bg-forest text-paper">
-      <div className="mx-auto grid max-w-7xl gap-10 px-4 py-12 sm:px-6 md:grid-cols-2 lg:grid-cols-4">
+      <div className="mx-auto grid max-w-8xl gap-10 px-4 py-8 mb-4 sm:px-6 md:grid-cols-2 lg:grid-cols-4">
         <div>
           <p className="font-display text-2xl italic">{data?.farm_name ?? "Farm"}</p>
           {data?.tagline && <p className="mt-2 text-sm text-paper/75">{data.tagline}</p>}

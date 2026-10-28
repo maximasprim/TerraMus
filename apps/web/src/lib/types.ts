@@ -873,6 +873,42 @@ export interface AnimalProfitabilityDetail {
   expected_sale_price: string | null;
   profit: string | null;
   is_actual: boolean;
+  // Added for sales made outside the web shop (feedlot module). Optional so older
+  // API responses still type-check.
+  overhead_cost?: string;
+  sale_channel?: "web" | "feedlot" | null;
+  outcome?: "sold" | "culled" | "died" | "active";
+  estimate_source?: "expected_sale_price" | "feedlot_projection" | "sale_price_missing" | null;
+  intake_batch?: number | null;
+  sale_batch?: number | null;
+  exit_date?: string | null;
+  entry_weight_kg?: string | null;
+  end_weight_kg?: string | null;
+  weight_gain_kg?: string | null;
+  days_on_farm?: number | null;
+  avg_daily_gain_kg?: string | null;
+  price_per_kg?: string | null;
+  breakeven_price_per_kg?: string | null;
+}
+
+export interface ProfitabilityChannelTotals {
+  channel: "web" | "feedlot";
+  head: number;
+  revenue: string;
+  cost: string;
+  profit: string;
+}
+
+export interface ProfitabilityTotals {
+  head_sold: number;
+  head_culled: number;
+  head_died: number;
+  head_active: number;
+  realised_revenue: string;
+  realised_cost: string;
+  realised_profit: string;
+  loss_from_culled_died: string;
+  by_channel: ProfitabilityChannelTotals[];
 }
 
 export interface ProfitabilityReport {
@@ -882,6 +918,26 @@ export interface ProfitabilityReport {
   most_profitable: AnimalProfitabilityDetail[];
   least_profitable: AnimalProfitabilityDetail[];
   average_profit: string | null;
+  totals?: ProfitabilityTotals | null;
+}
+
+export interface ProfitLine {
+  category: string;
+  label: string;
+  amount: string;
+  note: string | null;
+}
+
+export interface AnimalProfitabilityBreakdown {
+  summary: AnimalProfitabilityDetail;
+  costs: ProfitLine[];
+  returns: ProfitLine[];
+  total_cost: string;
+  total_return: string;
+  net: string | null;
+  net_is_actual: boolean;
+  reason: string | null;
+  weight_history: { start: string; end: string; days: number; gain_kg: string; adg_kg: string | null }[];
 }
 
 export interface PaymentMethod {

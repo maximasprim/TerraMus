@@ -332,12 +332,13 @@ function Worksheet() {
   const [error, setError] = useState<string | null>(null);
   const [asOf, setAsOf] = useState("");
   const [exporting, setExporting] = useState(false);
+  const [postToFinance, setPostToFinance] = useState(true);
   const run = useMutation({
     mutationFn: (dry: boolean) => {
       if (!file) throw new Error("Choose the .xlsx worksheet first");
       const fd = new FormData();
       fd.append("file", file);
-      return apiUpload<ImportReport>(`/api/v1/feedlot/worksheet/import?dry_run=${dry}`, fd);
+      return apiUpload<ImportReport>(`/api/v1/feedlot/worksheet/import?dry_run=${dry}&post_to_finance=${postToFinance}`, fd);
     },
     onSuccess: (d) => { setReport(d); setError(null); if (!d.dry_run && d.ok) queryClient.invalidateQueries({ queryKey: ["feedlot"] }); },
     onError: (e) => setError(e instanceof Error ? e.message : "Import failed"),
@@ -355,6 +356,10 @@ function Worksheet() {
         <h2 className="font-display text-lg text-forest">Import your worksheet</h2>
         <p className="text-sm text-muted">Reads the BATCH, Sales weight, register and costing sheets. Always preview first: nothing is saved until you press Import. Re-importing the same file changes nothing; a newer copy adds only what is new.</p>
         <input type="file" accept=".xlsx,.xlsm" onChange={(e) => { setFile(e.target.files?.[0] ?? null); setReport(null); }} className="block w-full text-sm" />
+        <label className="flex items-start gap-2 text-sm">
+          <input type="checkbox" className="mt-1" checked={postToFinance} onChange={(e) => { setPostToFinance(e.target.checked); setReport(null); }} />
+          <span>Also record the <b>new</b> sales and purchases in Finance, dated on the day they happened. Each is recorded once only, so re-importing never doubles anything.</span>
+        </label>
         {error && <ErrorState message={error} />}
         <div className="flex gap-2">
           <Button variant="ghost" disabled={!file || run.isPending} onClick={() => run.mutate(true)}>Preview</Button>
@@ -384,6 +389,74 @@ function Worksheet() {
         <Input label="Report as at (optional)" type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} />
         <Button disabled={exporting} onClick={doExport}>{exporting ? "Preparing…" : "Download worksheet (.xlsx)"}</Button>
       </Card>
+      <FinanceSync />
     </div>
+  );
+}
+
+interface LedgerSyncResult {
+  dry_run: boolean; needs_confirmation: boolean;
+  sales: { missing: number; missing_amount: number; posted: number; already_recorded: number; no_price: number };
+  purchases: { missing: number; missing_amount: number; posted: number; already_recorded: number; no_cost: number };
+  overlap: { manual_sales: { count: number; total: number }; manual_purchases: { count: number; total: number } };
+  sample: { kind: string; animal: string; date: string; amount: number }[];
+}
+
+function FinanceSync() {
+  const queryClient = useQueryClient();
+  const [result, setResult] = useState<LedgerSyncResult | null>(null);
+  const [confirm, setConfirm] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const run = useMutation({
+    mutationFn: (dry: boolean) => apiFetch<LedgerSyncResult>(`/api/v1/feedlot/ledger-sync?dry_run=${dry}&confirm_overlap=${confirm}`, { method: "POST" }),
+    onSuccess: (d) => { setResult(d); setError(null); if (!d.dry_run) queryClient.invalidateQueries(); },
+    onError: (e) => setError(errMsg(e, "Sync failed")),
+  });
+  const nothingToDo = result && result.sales.missing === 0 && result.purchases.missing === 0;
+  return (
+    <Card className="space-y-3 lg:col-span-2">
+      <h2 className="font-display text-lg text-forest">Sync feedlot sales and purchases to Finance</h2>
+      <p className="text-sm text-muted">
+        For sales and purchases that are in the feedlot but not yet in Finance, for example a worksheet imported earlier. Press Check first:
+        it shows what would be recorded and changes nothing. Each sale and purchase is recorded once only, so this is safe to repeat.
+      </p>
+      {error && <ErrorState message={error} />}
+      <div className="flex gap-2">
+        <Button variant="ghost" disabled={run.isPending} onClick={() => run.mutate(true)}>Check (nothing saved)</Button>
+        <Button disabled={run.isPending || !result || !result.dry_run || !!nothingToDo || (result.needs_confirmation && !confirm)} onClick={() => run.mutate(false)}>Record in Finance</Button>
+      </div>
+      {result && (
+        <div className="space-y-2 border-t border-hairline pt-3 text-sm">
+          {result.dry_run ? (
+            nothingToDo ? <p className="font-medium text-forest">Finance is already up to date. Nothing to record.</p> : (
+              <p>
+                Would record <b>{result.sales.missing}</b> sale(s) totalling <b>KES {kes(result.sales.missing_amount)}</b>
+                {result.purchases.missing > 0 && <> and <b>{result.purchases.missing}</b> purchase(s) totalling <b>KES {kes(result.purchases.missing_amount)}</b></>}.
+              </p>
+            )
+          ) : (
+            <p className="font-medium text-forest">Recorded {result.sales.posted} sale(s) and {result.purchases.posted} purchase(s) in Finance.</p>
+          )}
+          {result.sales.no_price > 0 && <p className="text-xs text-amber-700">{result.sales.no_price} sale(s) have no price per kg and are skipped. Set the sale batch price, then check again.</p>}
+          {result.dry_run && result.needs_confirmation && (
+            <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+              <p className="mb-2 font-medium">Finance already has entries typed in by hand that may be the same bulls:</p>
+              <ul className="mb-2 list-disc pl-5">
+                {result.overlap.manual_sales.count > 0 && <li>{result.overlap.manual_sales.count} livestock sale(s), KES {kes(result.overlap.manual_sales.total)}</li>}
+                {result.overlap.manual_purchases.count > 0 && <li>{result.overlap.manual_purchases.count} livestock purchase(s), KES {kes(result.overlap.manual_purchases.total)}</li>}
+              </ul>
+              <p className="mb-2">Recording these as well could count the same money twice, and Finance entries cannot be deleted afterwards. Review them in Finance first.</p>
+              <label className="flex items-start gap-2"><input type="checkbox" className="mt-0.5" checked={confirm} onChange={(e) => setConfirm(e.target.checked)} /><span>I checked: those entries are different from these bulls.</span></label>
+            </div>
+          )}
+          {result.dry_run && result.sample.length > 0 && (
+            <details><summary className="cursor-pointer text-muted">Preview of the first {result.sample.length}</summary>
+              <table className="mt-1 w-full text-xs"><tbody>
+                {result.sample.map((r, i) => <tr key={i} className="border-b border-hairline/60"><td className="py-1 font-mono">{r.animal}</td><td>{r.kind}</td><td>{r.date}</td><td className="text-right">KES {kes(r.amount)}</td></tr>)}
+              </tbody></table></details>
+          )}
+        </div>
+      )}
+    </Card>
   );
 }

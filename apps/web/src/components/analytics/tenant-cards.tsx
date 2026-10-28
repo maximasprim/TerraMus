@@ -76,11 +76,32 @@ export function IncomeBreakdownCard({ finance, className }: { finance: FinanceAn
 export function SalesRevenueCard({ sales, className }: { sales: SalesAnalytics; className?: string }) {
   const months = sales.monthly.map((m) => m.month);
   return (
-    <ChartCard title="Sales revenue" subtitle="Paid orders, per month" empty={sales.total_orders === 0} emptyText="No paid orders in this period." className={className}>
+    <ChartCard title="Sales revenue" subtitle="Paid web orders and feedlot sales, per month" empty={sales.total_orders === 0 && !sales.feedlot_head} emptyText="No paid orders or feedlot sales in this period." className={className}>
       <BarChart
-        ariaLabel="Sales revenue per month" showLegend={false}
+        ariaLabel="Sales revenue per month" showLegend={!!sales.feedlot_head} stacked
         categories={monthLabels(months)} tooltipTitles={monthTitles(months)} format={kes}
-        series={[{ name: "Revenue", color: SEMANTIC.income, values: sales.monthly.map((m) => toNumber(m.revenue)) }]}
+        series={[
+          { name: "Web orders", color: SEMANTIC.income, values: sales.monthly.map((m) => toNumber(m.revenue)) },
+          ...(sales.feedlot_head ? [{ name: "Feedlot sales", color: SEMANTIC.net, values: sales.monthly.map((m) => toNumber(m.feedlot_revenue ?? "0")) }] : []),
+        ]}
+      />
+    </ChartCard>
+  );
+}
+
+/** Feedlot money out (bulls bought, by delivery date) against money in (bulls sold, by sale date), per month.
+ *  Side by side, never stacked: purchases are an outflow and must not be added onto sales. */
+export function FeedlotTradeCard({ sales, className }: { sales: SalesAnalytics; className?: string }) {
+  const months = sales.monthly.map((m) => m.month);
+  return (
+    <ChartCard title="Feedlot: bought vs sold" subtitle="Bulls bought (by delivery date) and sold (by sale date), per month" empty={!sales.feedlot_head && !sales.feedlot_purchase_head} emptyText="No feedlot purchases or sales in this period." className={className}>
+      <BarChart
+        ariaLabel="Feedlot purchases and sales per month"
+        categories={monthLabels(months)} tooltipTitles={monthTitles(months)} format={kes}
+        series={[
+          { name: "Bought", color: SEMANTIC.expense, values: sales.monthly.map((m) => toNumber(m.feedlot_purchases ?? "0")) },
+          { name: "Sold", color: SEMANTIC.income, values: sales.monthly.map((m) => toNumber(m.feedlot_revenue ?? "0")) },
+        ]}
       />
     </ChartCard>
   );

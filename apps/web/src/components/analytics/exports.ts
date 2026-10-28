@@ -21,7 +21,10 @@ export function tenantSectionRows(report: AnalyticsReport, section: TenantSectio
     case "sales":
       return [
         ...period,
-        ...table("Monthly (paid orders)", ["Month", "Orders", "Revenue"], report.sales.monthly.map((m) => [m.month, m.orders, num(m.revenue)])),
+        ...table("Monthly (paid web orders, feedlot sales and feedlot purchases)",
+          ["Month", "Web orders", "Web revenue", "Feedlot head sold", "Feedlot revenue", "Feedlot head bought", "Feedlot purchases"],
+          report.sales.monthly.map((m) => [m.month, m.orders, num(m.revenue), m.feedlot_head ?? 0, num(m.feedlot_revenue ?? "0"),
+            m.feedlot_purchase_head ?? 0, num(m.feedlot_purchases ?? "0")])),
         ...table("Orders by status", ["Status", "Orders"], report.sales.orders_by_status.map((s) => [humanize(s.key), s.count])),
         ...table("Payments by method", ["Method", "Payments", "Amount"], report.sales.payments_by_provider.map((p) => [humanize(p.key), p.count, num(p.amount)])),
       ];

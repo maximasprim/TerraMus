@@ -36,7 +36,13 @@ class FinanceAnalytics(BaseModel):
 class MonthlySales(BaseModel):
     month: str
     orders: int
-    revenue: Decimal
+    revenue: Decimal            # paid web orders (unchanged meaning)
+    # Animals sold outside the web shop and recorded in the feedlot (typed in or imported).
+    feedlot_head: int = 0
+    feedlot_revenue: Decimal = Decimal("0")
+    # Bulls bought into the feedlot that month (by delivery date): the money going out against the sales above.
+    feedlot_purchase_head: int = 0
+    feedlot_purchases: Decimal = Decimal("0")
 
 
 class ProviderTotal(BaseModel):
@@ -50,8 +56,13 @@ class SalesAnalytics(BaseModel):
     orders_by_status: list[LabelCount]
     payments_by_provider: list[ProviderTotal]
     total_orders: int  # revenue-bearing orders in the window
-    total_revenue: Decimal
+    total_revenue: Decimal      # web orders only (unchanged meaning)
     average_order_value: Decimal
+    feedlot_head: int = 0
+    feedlot_revenue: Decimal = Decimal("0")
+    combined_revenue: Decimal = Decimal("0")   # web orders + feedlot sales
+    feedlot_purchase_head: int = 0
+    feedlot_purchases: Decimal = Decimal("0")  # landed cost of bulls delivered in the window
 
 
 class HerdAnalytics(BaseModel):

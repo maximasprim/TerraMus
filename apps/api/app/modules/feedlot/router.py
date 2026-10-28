@@ -163,6 +163,7 @@ async def import_worksheet(
     dry_run: bool = Query(True, description="Preview only: nothing is saved. Set false to commit."),
     farm_id: uuid.UUID | None = Query(None),
     include_costing: bool = Query(True),
+    post_to_finance: bool = Query(True, description="Also record the NEW sales and purchases in Finance (each at most once)."),
     user: User = Depends(require_permission("feedlot.manage")),
     db: AsyncSession = Depends(get_db),
 ):
@@ -173,7 +174,24 @@ async def import_worksheet(
     if len(content) > MAX_WORKSHEET_BYTES:
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Workbook is larger than 15 MB")
     return await run_import(db, user.organization_id, user.id, content, farm_id=farm_id,
-                            dry_run=dry_run, include_costing=include_costing)
+                            dry_run=dry_run, include_costing=include_costing, post_to_finance=post_to_finance)
+
+
+@router.post("/ledger-sync")
+async def sync_ledger(
+    dry_run: bool = Query(True, description="Preview only: shows what would be posted. Set false to post."),
+    include_purchases: bool = Query(True, description="Also book purchase costs of feedlot animals."),
+    confirm_overlap: bool = Query(False, description="Post even though Finance already holds manually typed entries of the same kind."),
+    user: User = Depends(require_permission("feedlot.manage")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Catch-up: books feedlot sales/purchases that exist but never reached Finance (for example
+    worksheets imported before the importer posted to Finance). Each sale/purchase is posted at most
+    once, so this is safe to repeat; it refuses to apply over manually typed Finance entries of the
+    same kind unless you confirm they are different."""
+    from app.modules.feedlot import ledger_sync
+    return await ledger_sync.reconcile(db, user.organization_id, user.id, dry_run=dry_run,
+                                       include_purchases=include_purchases, confirm_overlap=confirm_overlap)
 
 
 @router.get("/worksheet/export")

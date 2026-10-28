@@ -11,7 +11,7 @@ import { tenantSectionRows, type TenantSection } from "@/components/analytics/ex
 import {
   CropStatusCard, CropsByTypeCard, ExpenseBreakdownCard, HarvestCard, HealthByTypeCard, HealthCostCard, HerdBySpeciesCard,
   HerdByStatusCard, IncomeBreakdownCard, IncomeExpenseCard, InventoryValueCard, MilkProductionCard, NetProfitCard,
-  OrdersByStatusCard, PaymentsByProviderCard, SalesRevenueCard,
+  FeedlotTradeCard, OrdersByStatusCard, PaymentsByProviderCard, SalesRevenueCard,
 } from "@/components/analytics/tenant-cards";
 import { ApiError } from "@/lib/api";
 import { useCatalog } from "@/lib/use-catalog";
@@ -79,6 +79,8 @@ export default function ReportsPage() {
               <StatCard label="Expenses" value={kes(toNumber(data.finance.total_expense))} />
               <StatCard label="Net profit" value={kes(toNumber(data.finance.net))} hint={toNumber(data.finance.net) < 0 ? "Spending exceeded income" : undefined} />
               <StatCard label="Paid orders" value={String(data.sales.total_orders)} hint={`${kes(toNumber(data.sales.total_revenue))} revenue`} />
+              {!!data.sales.feedlot_head && <StatCard label="Feedlot sales" value={String(data.sales.feedlot_head)} hint={`${kes(toNumber(data.sales.feedlot_revenue ?? "0"))} revenue, sold outside the web shop`} />}
+              {!!data.sales.feedlot_purchase_head && <StatCard label="Feedlot purchases" value={String(data.sales.feedlot_purchase_head)} hint={`${kes(toNumber(data.sales.feedlot_purchases ?? "0"))} spent buying bulls`} />}
               {livestock && <StatCard label="Active herd" value={String(data.herd.active)} hint={`${data.herd.total} animals on record`} />}
               {livestock && <StatCard label="Milk / day" value={liters(toNumber(data.dairy.average_per_day))} hint="30-day average" />}
               {crops && <StatCard label="Active plantings" value={String(data.crops.active)} hint={`${data.crops.total} on record`} />}
@@ -94,6 +96,7 @@ export default function ReportsPage() {
 
             <Section id="sales" title="Sales" blurb={`Average paid order: ${kes(toNumber(data.sales.average_order_value))}.`} actions={csvButton("sales")}>
               <SalesRevenueCard sales={data.sales} className="lg:col-span-2" />
+              {!!(data.sales.feedlot_head || data.sales.feedlot_purchase_head) && <FeedlotTradeCard sales={data.sales} className="lg:col-span-2" />}
               <OrdersByStatusCard sales={data.sales} />
               <PaymentsByProviderCard sales={data.sales} />
             </Section>

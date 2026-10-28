@@ -11,11 +11,15 @@ export interface FinanceAnalytics {
   total_income: string; total_expense: string; net: string;
   income_by_category: LabelAmount[]; expense_by_category: LabelAmount[];
 }
-export interface MonthlySales { month: string; orders: number; revenue: string }
+export interface MonthlySales { month: string; orders: number; revenue: string; feedlot_head?: number; feedlot_revenue?: string; feedlot_purchase_head?: number; feedlot_purchases?: string }
 export interface ProviderTotal { key: string; amount: string; count: number }
 export interface SalesAnalytics {
   monthly: MonthlySales[]; orders_by_status: LabelCount[]; payments_by_provider: ProviderTotal[];
   total_orders: number; total_revenue: string; average_order_value: string;
+  // animals sold outside the web shop (feedlot); optional so older API responses still type-check
+  feedlot_head?: number; feedlot_revenue?: string; combined_revenue?: string;
+  // bulls bought into the feedlot (by delivery date): the money out against feedlot_revenue
+  feedlot_purchase_head?: number; feedlot_purchases?: string;
 }
 export interface HerdAnalytics { total: number; active: number; by_species: LabelCount[]; by_status: LabelCount[] }
 export interface DailyMilk { date: string; liters: string }
