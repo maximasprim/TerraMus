@@ -1,20 +1,20 @@
-"""Thin client for Vercel's Domains API — assigning a tenant's custom
+"""Thin client for Vercel's Domains API - assigning a tenant's custom
 domain to this project so Vercel serves it (TLS included, automatically)
 alongside every other domain already on the project.
 
 Same caveat every external-API integration in this codebase carries
 (payments/providers/mpesa.py, billing/pdf.py): written against Vercel's
-documented API shape, not exercised against a live account — this sandbox
+documented API shape, not exercised against a live account - this sandbox
 has no network access. Verify against a real `VERCEL_API_TOKEN` before
 relying on it.
 
 Two DIFFERENT kinds of "verified" matter here, and this module is only
 responsible for one of them:
-- Vercel's own domain verification (this module) — whether Vercel's edge
+- Vercel's own domain verification (this module) - whether Vercel's edge
   network has confirmed enough DNS control to safely start routing/TLS for
   the domain. Vercel handles this however it needs to; `get_domain_status`
   just reports what Vercel says.
-- This app's OWN domain_verified flag (identity/service.py) — an
+- This app's OWN domain_verified flag (identity/service.py) - an
   independent DNS TXT record check proving the org that ADDED the domain
   in our UI actually controls it, checked before we ever treat incoming
   requests for that Host header as belonging to that org. Vercel serving
@@ -44,14 +44,14 @@ def _team_params() -> dict[str, str]:
 
 
 class VercelNotConfigured(Exception):
-    """Raised when VERCEL_API_TOKEN/VERCEL_PROJECT_ID aren't set — the
+    """Raised when VERCEL_API_TOKEN/VERCEL_PROJECT_ID aren't set - the
     custom-domains feature is entirely opt-in (see config.py), so callers
     should catch this and surface a clear "not enabled" error rather than
     a raw connection failure."""
 
 
 async def add_domain_to_project(domain: str) -> dict:
-    """POST /v10/projects/{project}/domains — registers the domain against
+    """POST /v10/projects/{project}/domains - registers the domain against
     this Vercel project. Idempotent in practice: re-adding a domain already
     on the project returns its current state rather than erroring, per
     Vercel's documented behavior."""
@@ -68,7 +68,7 @@ async def add_domain_to_project(domain: str) -> dict:
 
 
 async def get_domain_status(domain: str) -> dict:
-    """GET /v9/projects/{project}/domains/{domain} — current verification/
+    """GET /v9/projects/{project}/domains/{domain} - current verification/
     config state Vercel has for this domain (includes `verified`, and a
     `verification` array of {type, domain, value} challenges if Vercel
     still needs something published before it'll route traffic)."""

@@ -13,6 +13,7 @@ from app.modules.identity.models import Organization
 from app.modules.receivables.models import AccountEntry
 from app.modules.training import schemas
 from app.modules.training.models import TrainingAttendance, TrainingCourse, TrainingEnrolment, TrainingSession
+from app.modules.cycles.deps import CycleSel, apply_col, ensure_writable
 
 MIN_ATTENDANCE = 0.75
 D = lambda x: Decimal(str(x))
@@ -73,27 +74,32 @@ def _session_out(s: TrainingSession, course: TrainingCourse, c: dict | None) -> 
             "end_date": s.end_date.isoformat(), "venue": s.venue, "farm_id": str(s.farm_id) if s.farm_id else None,
             "capacity": cap, "fee": float(s.fee if s.fee is not None else course.fee), "status": s.status, "notes": s.notes,
             "enrolled": c["enrolled"], "seats_left": (cap - c["enrolled"]) if cap else None, "by_status": c["by_status"],
-            "fees_charged": float(c["charged"])}
+            "fees_charged": float(c["charged"]),
+            "production_cycle_id": str(s.production_cycle_id) if s.production_cycle_id else None}
 
 
 async def create_session(db, org_id, req: schemas.SessionCreate):
+    await ensure_writable(db, org_id, req.production_cycle_id)
     course = await _one(db, TrainingCourse, org_id, req.course_id, "Course")
     end = req.end_date or (req.start_date + timedelta(days=course.duration_days - 1))
     if end < req.start_date:
         raise HTTPException(422, "end_date cannot be before start_date")
     s = TrainingSession(organization_id=org_id, course_id=course.id, farm_id=req.farm_id, start_date=req.start_date, end_date=end,
-                        venue=req.venue, capacity=req.capacity, fee=req.fee, notes=req.notes)
+                        venue=req.venue, capacity=req.capacity, fee=req.fee, notes=req.notes,
+                        production_cycle_id=req.production_cycle_id)
     db.add(s); await db.commit()
     return _session_out(s, course, None)
 
 
-async def list_sessions(db, org_id, status_: str | None, start: date | None, end: date | None, course_id=None):
+async def list_sessions(db, org_id, status_: str | None, start: date | None, end: date | None, course_id=None,
+                        pcycle: CycleSel | None = None):
     q = (select(TrainingSession, TrainingCourse).join(TrainingCourse, TrainingCourse.id == TrainingSession.course_id)
          .where(TrainingSession.organization_id == org_id).order_by(TrainingSession.start_date.desc()))
     if status_: q = q.where(TrainingSession.status == status_)
     if start: q = q.where(TrainingSession.end_date >= start)
     if end: q = q.where(TrainingSession.start_date <= end)
     if course_id: q = q.where(TrainingSession.course_id == course_id)
+    q = apply_col(q, TrainingSession.production_cycle_id, pcycle)
     rows = (await db.execute(q)).all()
     counts = await _counts(db, [s.id for s, _ in rows]) if rows else {}
     return [_session_out(s, c, counts.get(s.id)) for s, c in rows]
@@ -175,10 +181,15 @@ async def enrol(db, org_id, user_id, session_id, req: schemas.EnrolRequest):
     if req.bill and fee > 0 and customer_id:   # same transaction as the enrolment
         db.add(AccountEntry(organization_id=org_id, customer_id=customer_id, entry_type="charge", amount=fee, entry_date=date.today(),
                             reference_type="training_enrolment", reference_id=e.id, farm_id=s.farm_id, activity="training",
+                            production_cycle_id=s.production_cycle_id,
                             description=f"{course.title} ({s.start_date:%d/%m/%Y}) - {req.participant_name}", created_by=user_id))
     await db.commit()
     return {"id": str(e.id), "status": e.status, "fee_charged": float(fee), "customer_id": str(customer_id) if customer_id else None,
             "seats_left": (cap - len(live) - 1) if cap else None}
+
+
+async def _session_cycle(db, session_id):
+    return (await db.execute(select(TrainingSession.production_cycle_id).where(TrainingSession.id == session_id))).scalar_one_or_none()
 
 
 async def set_enrolment_status(db, org_id, user_id, enrolment_id, new: str):
@@ -192,7 +203,8 @@ async def set_enrolment_status(db, org_id, user_id, enrolment_id, new: str):
         if owed > 0:      # reverse the unpaid part of the charge
             db.add(AccountEntry(organization_id=org_id, customer_id=e.customer_id, entry_type="writeoff", amount=owed,
                                 entry_date=date.today(), reference_type="training_enrolment", reference_id=e.id,
-                                description=f"Enrolment cancelled: {e.participant_name}", created_by=user_id))
+                                description=f"Enrolment cancelled: {e.participant_name}", created_by=user_id,
+                                production_cycle_id=await _session_cycle(db, e.session_id)))
         if paid.get(e.id, 0) > 0:
             out["refund_due"] = float(paid[e.id])
     e.status = new
@@ -266,8 +278,8 @@ async def certificate_pdf(db, org_id, enrolment_id) -> bytes:
     return buf.getvalue()
 
 
-async def summary(db, org_id, start: date, end: date) -> dict:
-    sessions = await list_sessions(db, org_id, None, start, end)
+async def summary(db, org_id, start: date, end: date, pcycle: CycleSel | None = None) -> dict:
+    sessions = await list_sessions(db, org_id, None, start, end, pcycle=pcycle)
     sids = [uuid.UUID(s["id"]) for s in sessions]
     enrs = list((await db.execute(select(TrainingEnrolment).where(TrainingEnrolment.session_id.in_(sids or [None]),
                                                                   TrainingEnrolment.status != "cancelled"))).scalars())

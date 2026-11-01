@@ -27,7 +27,7 @@ class Organization(Base, UUIDPKMixin, TimestampMixin):
     # /shop/{slug} pages, reachable at e.g. farm.example.com instead of
     # yourapp.com/shop/farm-slug). custom_domain is the tenant-supplied
     # domain; domain_verification_token is the value they must publish as a
-    # DNS TXT record before domain_verified flips to True — proof of DNS
+    # DNS TXT record before domain_verified flips to True - proof of DNS
     # control, checked independently of whether Vercel has already started
     # routing traffic there (see core/vercel_client.py's module docstring
     # for why that's not the same thing). Nothing reads custom_domain as
@@ -53,6 +53,9 @@ class Organization(Base, UUIDPKMixin, TimestampMixin):
     tax_rate: Mapped[float] = mapped_column(Numeric(5, 2), default=0)
     default_weight_unit: Mapped[str] = mapped_column(String(8), default="kg")
     default_volume_unit: Mapped[str] = mapped_column(String(8), default="L")
+    # Which production cycle the admin console opens on for people who have not picked one themselves:
+    # 'all' (the default - nothing changes) or 'running' (the single running cycle, if there is exactly one).
+    default_cycle_view: Mapped[str] = mapped_column(String(12), default="all", server_default="all")
 
     users: Mapped[list["User"]] = relationship(back_populates="organization")
     roles: Mapped[list["Role"]] = relationship(back_populates="organization")

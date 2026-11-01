@@ -28,6 +28,12 @@ class DashboardSummary(BaseModel):
     active_crop_plantings: int = 0
     crop_planting_value: Decimal = Decimal("0")
     low_stock_crop_listing_count: int = 0
+    # "month" = the revenue/expense/profit cards cover the current calendar month (all cycles);
+    # "cycle" = they cover the selected production cycle from its start to today.
+    finance_period: str = "month"
+    # True when some feedlot animals have no stated value and herd_value includes an estimate for them.
+    herd_value_estimated: bool = False
+    herd_value_basis: str | None = None
 
 
 class AnimalProfitabilityDetail(BaseModel):

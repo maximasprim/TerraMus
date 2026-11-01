@@ -9,7 +9,7 @@ import { Card, Button, ErrorState } from "@/components/ui";
 import { platformApiFetch, PlatformApiError } from "@/lib/platform-api";
 import { usePlatformMe } from "@/lib/use-platform-auth";
 import { PLATFORM_MODULES } from "@/lib/platform-modules";
-import type { OrganizationSummaryOut, TenantCatalogSettings } from "@/lib/platform-types";
+import type { OrganizationSummaryOut, PlatformPlan, TenantCatalogSettings } from "@/lib/platform-types";
 
 /** "Livestock: 3 species" / "Livestock: all species" / "Livestock: off". */
 function catalogSummary(module: string, enabled: boolean, list: string[] | null, noun: string): string {
@@ -34,6 +34,38 @@ export default function OrganizationDetailPage() {
   const catalogQuery = useQuery<TenantCatalogSettings>({
     queryKey: ["platform-catalog-settings", id],
     queryFn: () => platformApiFetch<TenantCatalogSettings>(`/api/v1/platform/organizations/${id}/catalog-settings`),
+  });
+
+  // Plan management (superadmin): choose a plan, status and optional period end, then save - no payment involved.
+  const plansQuery = useQuery<PlatformPlan[]>({
+    queryKey: ["platform-plans"],
+    queryFn: () => platformApiFetch<PlatformPlan[]>("/api/v1/platform/billing/tiers"),
+  });
+  const [planSlug, setPlanSlug] = useState("");
+  const [planStatus, setPlanStatus] = useState("active");
+  const [planEnd, setPlanEnd] = useState("");
+  const [planMsg, setPlanMsg] = useState<string | null>(null);
+  const changePlan = useMutation({
+    mutationFn: () =>
+      platformApiFetch<OrganizationSummaryOut>(`/api/v1/platform/organizations/${id}/subscription`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          tier_slug: planSlug,
+          status: planStatus,
+          current_period_end: planEnd ? new Date(`${planEnd}T23:59:59`).toISOString() : null,
+        }),
+      }),
+    onSuccess: (o) => {
+      queryClient.invalidateQueries({ queryKey: ["platform-organization", id] });
+      queryClient.invalidateQueries({ queryKey: ["platform-organizations"] });
+      queryClient.invalidateQueries({ queryKey: ["platform-dashboard"] });
+      setError(null);
+      setPlanMsg(`Plan set to ${o.subscription_tier} (${o.subscription_status}).`);
+    },
+    onError: (err) => {
+      setPlanMsg(null);
+      setError(err instanceof PlatformApiError ? err.message : "Failed to change plan");
+    },
   });
 
   const toggleSuspend = useMutation({
@@ -107,6 +139,65 @@ export default function OrganizationDetailPage() {
           <p className="font-display text-2xl text-forest capitalize">{org.subscription_status ?? "-"}</p>
         </Card>
       </div>
+
+      {canWrite && (
+        <Card>
+          <p className="text-xs font-medium uppercase tracking-wider text-muted">Change plan</p>
+          <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-4">
+            <label className="text-sm">
+              <span className="mb-1 block text-muted">Plan</span>
+              <select
+                value={planSlug || org.subscription_tier_slug || ""}
+                onChange={(e) => { setPlanSlug(e.target.value); setPlanMsg(null); }}
+                className="block w-full rounded-md border border-hairline bg-white px-2 py-1.5 text-sm"
+              >
+                {!(planSlug || org.subscription_tier_slug) && <option value="" disabled>Choose a plan…</option>}
+                {(plansQuery.data ?? []).map((p) => (
+                  <option key={p.slug} value={p.slug}>
+                    {p.name} - KES {Number(p.monthly_price_kes).toLocaleString()}/mo · {p.max_animals ?? "unlimited"} animals · {p.max_users ?? "unlimited"} users
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-sm">
+              <span className="mb-1 block text-muted">Status</span>
+              <select
+                value={planStatus}
+                onChange={(e) => setPlanStatus(e.target.value)}
+                className="block w-full rounded-md border border-hairline bg-white px-2 py-1.5 text-sm"
+              >
+                <option value="active">Active</option>
+                <option value="trialing">Trialing</option>
+                <option value="past_due">Past due</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
+            </label>
+            <label className="text-sm">
+              <span className="mb-1 block text-muted">Period ends (optional)</span>
+              <input
+                type="date"
+                value={planEnd}
+                onChange={(e) => setPlanEnd(e.target.value)}
+                className="block w-full rounded-md border border-hairline bg-white px-2 py-1.5 text-sm"
+              />
+            </label>
+            <div className="flex items-end">
+              <Button
+                disabled={changePlan.isPending || !(planSlug || org.subscription_tier_slug)}
+                onClick={() => { if (!planSlug && org.subscription_tier_slug) setPlanSlug(org.subscription_tier_slug); changePlan.mutate(); }}
+              >
+                {changePlan.isPending ? "Saving…" : "Save plan"}
+              </Button>
+            </div>
+          </div>
+          <p className="mt-2 text-xs text-muted">
+            Takes effect immediately, with no payment. If the period has already ended it is extended by 30 days. A plan the
+            organization already exceeds (users or animals) is refused.
+            {org.subscription_period_end ? ` Current period ends ${new Date(org.subscription_period_end).toLocaleDateString()}.` : ""}
+          </p>
+          {planMsg && <p className="mt-2 text-sm text-forest">{planMsg}</p>}
+        </Card>
+      )}
 
       <Link
         href={`/platform/organizations/${org.id}/catalog`}

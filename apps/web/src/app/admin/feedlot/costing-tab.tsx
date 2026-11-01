@@ -5,9 +5,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Card, EmptyState, ErrorState, Input, Modal, Select } from "@/components/ui";
 import { apiFetch } from "@/lib/api";
 import { errMsg, FIELD, kes } from "./shared";
+import { useCycle } from "@/lib/cycle-context";
 
 type Kind = "settings" | "recipe" | "enterprise_budget" | "ration_plan" | "overhead_pool" | "land_use";
-interface Doc { id: string; kind: Kind; name: string; data: Record<string, unknown>; computed: Record<string, number | Record<string, number> | number[]> | null }
+interface Doc { id: string; kind: Kind; name: string; data: Record<string, unknown>; computed: Record<string, number | Record<string, number> | number[]> | null; production_cycle_id?: string | null }
 
 const KINDS: { kind: Kind; title: string; single: string; blurb: string }[] = [
   { kind: "ration_plan", title: "Ration plans", single: "ration plan", blurb: "Feed per day by stage, priced from your recipes and budgets. Drives the standard feed cost per animal." },
@@ -36,11 +37,15 @@ export function CostingTab() {
   const qc = useQueryClient();
   const [editing, setEditing] = useState<{ kind: Kind; doc: Doc | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { current, cycles } = useCycle();
+  const [onlyThisCycle, setOnlyThisCycle] = useState(false);
+  const cycleName = (id?: string | null) => cycles.find((c) => c.id === id)?.name;
   const docs = useQuery<Doc[]>({ queryKey: ["feedlot", "costing"], queryFn: () => apiFetch<Doc[]>("/api/v1/feedlot/costing") });
   const save = useMutation({
     mutationFn: (v: { kind: Kind; doc: Doc | null; name: string; data: Record<string, unknown> }) =>
       v.doc ? apiFetch(`/api/v1/feedlot/costing/${v.doc.id}`, { method: "PATCH", body: JSON.stringify({ name: v.name, data: v.data }) })
-            : apiFetch("/api/v1/feedlot/costing", { method: "POST", body: JSON.stringify({ kind: v.kind, name: v.name, data: v.data }) }),
+            : apiFetch("/api/v1/feedlot/costing", { method: "POST", body: JSON.stringify({ kind: v.kind, name: v.name, data: v.data,
+              production_cycle_id: onlyThisCycle && current ? current.id : undefined }) }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["feedlot"] }); setEditing(null); setError(null); },
     onError: (e) => setError(errMsg(e, "Could not save")),
   });
@@ -53,6 +58,7 @@ export function CostingTab() {
   return (
     <div className="space-y-6">
       <p className="text-sm text-muted">These documents drive feed cost, overhead and profit. Change a price here and every profit figure follows; nothing is typed into formulas by hand.</p>
+      <p className="text-xs text-muted">Documents marked with a cycle name apply to that cycle only; unmarked ones apply to every cycle that has no document of its own for that item.</p>
       {error && !editing && <ErrorState message={error} />}
       {docs.error && <ErrorState message={errMsg(docs.error, "Failed to load")} />}
       {KINDS.map(({ kind, title, blurb }) => {
@@ -67,7 +73,7 @@ export function CostingTab() {
             {items.length === 0 && <p className="text-sm text-muted">{kind === "settings" ? "Using the defaults (300 kg market-ready; ADG bands 0.2 / 0.4 / 0.7)." : "None yet."}</p>}
             {items.map((d) => (
               <div key={d.id} className="flex items-center justify-between gap-3 border-t border-hairline/60 py-2 text-sm">
-                <div><div className="font-medium">{d.name}</div><div className="text-xs text-muted">{headline(d)}</div></div>
+                <div><div className="font-medium">{d.name}{d.production_cycle_id && <span className="ml-2 rounded-full border border-brass/40 bg-brass/10 px-2 py-0.5 text-[11px] font-normal text-brass-dark">{cycleName(d.production_cycle_id) ?? "cycle"} only</span>}</div><div className="text-xs text-muted">{headline(d)}</div></div>
                 <div className="flex gap-2">
                   <Button variant="ghost" onClick={() => { setError(null); setEditing({ kind, doc: d }); }}>Edit</Button>
                   <Button variant="ghost" disabled={remove.isPending} onClick={() => { if (window.confirm(`Delete "${d.name}"? Profit figures that use it will change.`)) remove.mutate(d.id); }}>Delete</Button>
@@ -79,6 +85,11 @@ export function CostingTab() {
       {editing && (
         <Modal open onClose={() => setEditing(null)} title={`${editing.doc ? "Edit" : "New"} ${KINDS.find((k) => k.kind === editing.kind)?.single}`} size="lg">
           {error && <ErrorState message={error} />}
+          {!editing.doc && current && current.status !== "closed" && (
+            <label className="mb-3 flex items-start gap-2 rounded border border-brass/40 bg-brass/5 p-2 text-sm">
+              <input className="mt-1" type="checkbox" checked={onlyThisCycle} onChange={(e) => setOnlyThisCycle(e.target.checked)} />
+              <span>Use this only for <strong>{current.name}</strong> (other cycles keep the organisation-wide one). Leave unticked to apply it to every cycle.</span>
+            </label>)}
           <Editor kind={editing.kind} doc={editing.doc} all={all} busy={save.isPending}
             onSave={(name, data) => save.mutate({ kind: editing.kind, doc: editing.doc, name, data })} />
         </Modal>

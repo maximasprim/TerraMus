@@ -8,6 +8,7 @@ import { Card, StatCard, Button, Input, Select, Modal, ErrorState, EmptyState } 
 import { apiFetch, ApiError } from "@/lib/api";
 import type { FinanceTransaction, FinanceSummary, ProfitabilityReport } from "@/lib/types";
 import { clsx } from "clsx";
+import { useCycle } from "@/lib/cycle-context";
 
 const TABS = ["Summary", "Transactions", "Profitability", "By activity & farm"] as const;
 type Tab = (typeof TABS)[number];
@@ -24,7 +25,7 @@ const ACTIVITIES = ["livestock", "feedlot", "dairy", "crops", "fodder", "poultry
 
 interface TxnBody {
   transaction_type: string; category: string; amount: string; transaction_date: string; description?: string;
-  farm_id?: string; activity?: string;
+  farm_id?: string; activity?: string; production_cycle_id?: string | null;
 }
 interface ActivityRow { activity: string; income: number; expense: number; net: number; margin_pct: number | null }
 interface FarmRow { farm_id: string | null; farm_name: string; income: number; expense: number; net: number }
@@ -44,6 +45,7 @@ function today() {
 }
 
 export default function FinancePage() {
+  const { cycles } = useCycle();
   const [tab, setTab] = useState<Tab>("Summary");
   const [startDate, setStartDate] = useState(firstOfMonth());
   const [endDate, setEndDate] = useState(today());
@@ -182,6 +184,7 @@ export default function FinancePage() {
                   <th className="pb-2 font-medium">Type</th>
                   <th className="pb-2 font-medium">Category</th>
                   <th className="pb-2 font-medium">Amount</th>
+                  <th className="pb-2 font-medium">Cycle</th>
                   <th className="pb-2 font-medium">Description</th>
                 </tr>
               </thead>
@@ -194,6 +197,7 @@ export default function FinancePage() {
                     </td>
                     <td className="py-2 capitalize text-muted">{t.category.replace(/_/g, " ")}</td>
                     <td className="py-2 font-medium text-ink">KES {Number(t.amount).toLocaleString()}</td>
+                    <td className="py-2 text-muted">{cycles.find((c) => c.id === (t.effective_cycle_id ?? t.production_cycle_id))?.name ?? "-"}</td>
                     <td className="py-2 text-muted">{t.description ?? "-"}</td>
                   </tr>
                 ))}
@@ -352,12 +356,15 @@ function TransactionForm({
   const [description, setDescription] = useState("");
   const [farmId, setFarmId] = useState("");
   const [activity, setActivity] = useState("");
+  const { current, cycles } = useCycle();
+  const [cycle, setCycle] = useState(current && current.status !== "closed" ? current.id : "");
+  const open = cycles.filter((c) => c.status !== "closed");
 
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        onSubmit({ transaction_type: type, category, amount, transaction_date: date, description: description || undefined, farm_id: farmId || undefined, activity: activity || undefined });
+        onSubmit({ transaction_type: type, category, amount, transaction_date: date, description: description || undefined, farm_id: farmId || undefined, activity: activity || undefined, production_cycle_id: cycle || null });
       }}
       className="space-y-3"
     >
@@ -387,6 +394,11 @@ function TransactionForm({
           {ACTIVITIES.map((a) => <option key={a} value={a}>{a}</option>)}
         </Select>
       </div>
+      {open.length > 0 && (
+        <Select id="txn-cycle" label="Production cycle (optional)" value={cycle} onChange={(e) => setCycle(e.target.value)}>
+          <option value="">Not in a cycle (shared cost)</option>
+          {open.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.status})</option>)}
+        </Select>)}
       <Input id="txn-description" label="Description" value={description} onChange={(e) => setDescription(e.target.value)} />
       <Button type="submit" disabled={pending} className="w-full">
         {pending ? "Recording…" : "Record transaction"}

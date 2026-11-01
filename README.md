@@ -2,6 +2,14 @@
 
 Built in phases per the master spec (§64). **All nine backend phases (1-9) are complete, plus guest checkout (Phase 11), customer self-service accounts (Phase 15), procurement/employees/assets (Phases 12-14), and a real frontend (`apps/web`) covering the full staff workflow and a public storefront - see "Frontend" below for exactly what that does and doesn't cover, and "Phases 12-15" below for the most recently added backend modules and their verification status.**
 
+## Production cycles (Oct 2026)
+
+Every farm run - "Cycle 1", "Cycle 2" - is now a first-class object. Feedlot batches, finance, customer balances,
+fuel, fodder, flocks, crops, training, stock and costing can be filtered by it from one selector in the sidebar,
+and cycles can be closed, compared and adopted onto existing data without touching the append-only ledger.
+See [docs/PRODUCTION_CYCLES.md](docs/PRODUCTION_CYCLES.md). Migration `0038`; tests in
+`apps/api/tests/test_production_cycles.py` and `apps/web/scripts/cycle-scope.test.ts`.
+
 ## Phase 1 - Architecture, Database, Authentication, RBAC, Farm Management ✅
 ## Phase 2 - Livestock: core model, lifecycle timeline, weights, movement ✅
 ## Phase 2b - Health: vet records, follow-up/due tracking ✅

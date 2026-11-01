@@ -16,6 +16,7 @@ class ChargeCreate(BaseModel):
     reference_type: str = Field(default="manual", pattern=REF_PATTERN)
     reference_id: uuid.UUID | None = None
     farm_id: uuid.UUID | None = None
+    production_cycle_id: uuid.UUID | None = None
     activity: str | None = Field(default=None, pattern=ACTIVITY_PATTERN)
     salesperson: str | None = None
 
@@ -30,6 +31,7 @@ class PaymentCreate(BaseModel):
     reference_type: str | None = Field(default=None, pattern=REF_PATTERN)   # which sale this pays, if known
     reference_id: uuid.UUID | None = None
     farm_id: uuid.UUID | None = None
+    production_cycle_id: uuid.UUID | None = None
     activity: str | None = Field(default=None, pattern=ACTIVITY_PATTERN)
 
 
@@ -40,3 +42,4 @@ class WriteoffCreate(BaseModel):
     description: str = Field(min_length=3, max_length=255)    # a reason is mandatory for a write-off
     reference_type: str | None = Field(default=None, pattern=REF_PATTERN)
     reference_id: uuid.UUID | None = None
+    production_cycle_id: uuid.UUID | None = None

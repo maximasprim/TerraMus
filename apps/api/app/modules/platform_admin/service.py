@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.security import verify_password, hash_password, generate_password_reset_token, hash_refresh_token
 from app.modules.identity.models import Organization, User, AuditLog
 from app.modules.billing.models import Subscription, SubscriptionTier
-from app.modules.billing.service import ensure_default_tiers
+from app.modules.billing.service import check_tier_covers_current_usage, ensure_default_tiers, get_or_create_subscription
 from app.modules.platform_admin.models import PlatformAdmin, PlatformAdminPasswordResetToken
 from app.modules.platform_admin.security import create_platform_admin_token
 from app.modules.platform_admin import schemas
@@ -95,12 +95,15 @@ async def _to_summary(db: AsyncSession, org: Organization) -> schemas.Organizati
     row = sub_result.first()
     tier_name = row[1].name if row else None
     sub_status = row[0].status if row else None
+    tier_slug = row[1].slug if row else None
+    period_end = row[0].current_period_end if row else None
 
     return schemas.OrganizationSummaryOut(
         id=org.id, name=org.name, slug=org.slug, currency=org.currency,
         is_suspended=org.is_suspended, user_count=user_count,
         subscription_tier=tier_name, subscription_status=sub_status,
         created_at=org.created_at,
+        subscription_tier_slug=tier_slug, subscription_period_end=period_end,
     )
 
 
@@ -147,6 +150,40 @@ async def set_organization_status(
         db, org_id, admin_id, action="organization.suspend" if is_suspended else "organization.reactivate",
         entity_type="organization", entity_id=org_id,
         previous_value=previous, new_value={"is_suspended": is_suspended, "reason": reason},
+    )
+    await db.commit()
+    await db.refresh(org)
+    return await _to_summary(db, org)
+
+
+async def set_organization_subscription(
+    db: AsyncSession, org_id: uuid.UUID, admin_id: uuid.UUID, req: schemas.OrganizationSubscriptionUpdate,
+) -> schemas.OrganizationSummaryOut:
+    """Move a tenant to a plan without a payment. Refuses a plan whose limits the tenant already exceeds (same
+    rule the tenant's own self-service downgrade uses), is audited in the shared audit log, and is atomic."""
+    org = await get_organization(db, org_id)
+    tiers = await ensure_default_tiers(db)
+    tier = tiers.get(req.tier_slug.strip().lower())
+    if tier is None:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"Unknown plan '{req.tier_slug}'")
+    sub = await get_or_create_subscription(db, org_id)
+    await check_tier_covers_current_usage(db, org_id, tier)
+    previous_tier = (await db.execute(select(SubscriptionTier).where(SubscriptionTier.id == sub.tier_id))).scalar_one()
+    previous = {"tier": previous_tier.slug, "status": sub.status,
+                "current_period_end": sub.current_period_end.isoformat() if sub.current_period_end else None}
+    now = datetime.now(timezone.utc)
+    sub.tier_id = tier.id
+    sub.status = req.status or "active"
+    sub.cancel_at_period_end = False
+    if req.current_period_end is not None:
+        sub.current_period_end = req.current_period_end
+    elif sub.current_period_end is None or sub.current_period_end < now:
+        sub.current_period_end = now + timedelta(days=30)
+    await record_admin_action(
+        db, org_id, admin_id, action="organization.subscription_change", entity_type="subscription", entity_id=sub.id,
+        previous_value=previous,
+        new_value={"tier": tier.slug, "status": sub.status, "current_period_end": sub.current_period_end.isoformat(),
+                   "reason": req.reason},
     )
     await db.commit()
     await db.refresh(org)

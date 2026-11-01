@@ -35,6 +35,7 @@ class SessionCreate(BaseModel):
     capacity: int | None = Field(default=None, ge=1)
     fee: Decimal | None = Field(default=None, ge=0)
     notes: str | None = None
+    production_cycle_id: uuid.UUID | None = None
 
 
 class SessionUpdate(BaseModel):

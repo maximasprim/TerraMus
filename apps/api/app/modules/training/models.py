@@ -29,6 +29,7 @@ class TrainingSession(Base, UUIDPKMixin, TimestampMixin):
     __table_args__ = (CheckConstraint("status in ('scheduled','in_progress','completed','cancelled')", name="valid_session_status"),
                       CheckConstraint("end_date >= start_date", name="valid_dates"))
     organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    production_cycle_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("production_cycles.id"), nullable=True, index=True)
     course_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("training_courses.id"), index=True)
     farm_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("farms.id"), nullable=True)
     start_date: Mapped[date] = mapped_column(Date)

@@ -121,7 +121,7 @@ export default function DomainSettingsPage() {
                     <p className="mt-1 font-mono">A record → {status.dns_instructions.a_record}</p>
                   </div>
                   <div>
-                    <p className="font-medium text-ink">If using a subdomain (e.g. terramus.com) — recommended:</p>
+                    <p className="font-medium text-ink">If using a subdomain (e.g. terramus.com) - recommended:</p>
                     <p className="mt-1 font-mono">CNAME record → {status.dns_instructions.cname_record}</p>
                   </div>
                   <div>

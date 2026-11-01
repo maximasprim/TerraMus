@@ -14,6 +14,9 @@ from app.modules.fodder.models import (
     FodderCost, FodderCycle, FodderHarvest, FodderInvestment, FodderMovement, FodderPlot, FodderPrice, FodderProduct,
 )
 from app.modules.receivables.models import AccountEntry
+from app.modules.cycles.deps import CycleSel, apply_col, ensure_writable
+from app.modules.cycles import resolve as cyc_resolve
+from app.modules.cycles.deps import cond as _cycle_cond
 
 D = lambda x: Decimal(str(x))
 F = lambda x: float(x)
@@ -170,19 +173,22 @@ async def all_cycle_economics(db, org_id, as_of: date | None = None) -> dict[uui
 def _cycle_out(c: FodderCycle, plot: FodderPlot, prod: FodderProduct, econ: dict | None) -> dict:
     return {"id": str(c.id), "label": c.label, "plot_id": str(c.plot_id), "plot": plot.name, "product_id": str(c.product_id), "product": prod.name,
             "unit_label": prod.unit_label, "start_date": c.start_date.isoformat(), "end_date": c.end_date.isoformat() if c.end_date else None,
-            "acres": F(c.acres), "status": c.status, "budget_name": c.budget_name, "notes": c.notes, "economics": econ}
+            "acres": F(c.acres), "status": c.status, "budget_name": c.budget_name, "notes": c.notes, "economics": econ,
+            "production_cycle_id": str(c.production_cycle_id) if c.production_cycle_id else None}
 
 
-async def list_cycles(db, org_id, state: str | None = None, as_of: date | None = None):
+async def list_cycles(db, org_id, state: str | None = None, as_of: date | None = None, pcycle: CycleSel | None = None):
     q = select(FodderCycle, FodderPlot, FodderProduct).join(FodderPlot, FodderPlot.id == FodderCycle.plot_id).join(FodderProduct, FodderProduct.id == FodderCycle.product_id) \
         .where(FodderCycle.organization_id == org_id).order_by(FodderCycle.start_date.desc())
     if state:
         q = q.where(FodderCycle.status == state)
+    q = apply_col(q, FodderCycle.production_cycle_id, pcycle)
     econ = await all_cycle_economics(db, org_id, as_of)
     return [_cycle_out(c, p, pr, econ.get(c.id)) for c, p, pr in (await db.execute(q)).all()]
 
 
 async def create_cycle(db, org_id, req: schemas.CycleCreate):
+    await ensure_writable(db, org_id, req.production_cycle_id)
     plot = await _one(db, FodderPlot, org_id, req.plot_id, "Plot")
     prod = await _one(db, FodderProduct, org_id, req.product_id, "Product")
     acres = D(req.acres if req.acres is not None else plot.acres)
@@ -191,7 +197,8 @@ async def create_cycle(db, org_id, req: schemas.CycleCreate):
         raise HTTPException(409, "This plot is retired")
     if F(acres) > free + 1e-9:
         raise HTTPException(422, f"Only {free:g} acres of {plot.name} are free (the rest is planted in an open cycle). Close that cycle first or plant fewer acres.")
-    c = FodderCycle(organization_id=org_id, plot_id=plot.id, product_id=prod.id, label=req.label, start_date=req.start_date, acres=acres, budget_name=req.budget_name, notes=req.notes)
+    c = FodderCycle(organization_id=org_id, plot_id=plot.id, product_id=prod.id, label=req.label, start_date=req.start_date, acres=acres, budget_name=req.budget_name, notes=req.notes,
+                    production_cycle_id=req.production_cycle_id)
     db.add(c); await db.commit()
     return _cycle_out(c, plot, prod, None)
 
@@ -234,7 +241,7 @@ async def add_cost(db, org_id, user_id, cycle_id, req: schemas.CostCreate):
     if req.post_to_finance:      # same transaction: the expense cannot be missing from the books
         t = FinanceTransaction(organization_id=org_id, transaction_type="expense", category=_COST_TO_LEDGER[req.category], amount=req.amount, transaction_date=req.cost_date,
                                farm_id=plot.farm_id, activity=schemas.ACTIVITY_FODDER, description=f"Fodder: {c.label} - {req.description or req.category}",
-                               reference_type="fodder_cost", reference_id=row.id, created_by=user_id)
+                               reference_type="fodder_cost", reference_id=row.id, production_cycle_id=c.production_cycle_id, created_by=user_id)
         db.add(t); await db.flush(); row.finance_transaction_id = t.id
     await db.commit()
     return {"id": str(row.id), "posted_to_finance": bool(row.finance_transaction_id)}
@@ -249,7 +256,8 @@ async def add_harvest(db, org_id, user_id, cycle_id, req: schemas.HarvestCreate)
     h = FodderHarvest(organization_id=org_id, cycle_id=c.id, harvest_date=req.harvest_date, quantity=req.quantity, kg=kg, quality=req.quality, notes=req.notes, created_by=user_id)
     db.add(h); await db.flush()
     db.add(FodderMovement(organization_id=org_id, product_id=prod.id, movement_date=req.harvest_date, movement_type="harvest", kg_delta=kg,
-                          reference_type="harvest", reference_id=h.id, reason=f"Harvest: {c.label}", created_by=user_id))
+                          reference_type="harvest", reference_id=h.id, reason=f"Harvest: {c.label}",
+                          production_cycle_id=c.production_cycle_id, created_by=user_id))
     await db.commit()
     return {"id": str(h.id), "kg": F(kg), "units": F(req.quantity), "unit_label": prod.unit_label}
 
@@ -353,6 +361,8 @@ async def cost_map(db, org_id) -> dict[str, float]:
 
 
 async def add_movement(db, org_id, user_id, req: schemas.MovementCreate):
+    await ensure_writable(db, org_id, req.production_cycle_id)
+    pc = req.production_cycle_id
     prod = await _one(db, FodderProduct, org_id, req.product_id, "Product")
     kg = D(req.kg) if req.kg is not None else D(req.units) * D(prod.kg_per_unit)
     bal = (await _balances(db, org_id)).get(prod.id, 0.0)
@@ -367,48 +377,55 @@ async def add_movement(db, org_id, user_id, req: schemas.MovementCreate):
         if delta == 0:
             return {"status": "no_difference", "balance_kg": bal}
         m = FodderMovement(organization_id=org_id, product_id=prod.id, movement_date=req.movement_date, movement_type="count_adjust", kg_delta=delta,
-                           reason=req.reason or f"Stock count: {F(kg):,.1f} kg counted, {bal:,.1f} kg expected", created_by=user_id)
+                           reason=req.reason or f"Stock count: {F(kg):,.1f} kg counted, {bal:,.1f} kg expected", production_cycle_id=pc, created_by=user_id)
         result = {"expected_kg": round(bal, 2), "counted_kg": F(kg), "difference_kg": F(delta), "difference_pct": round(100 * F(delta) / bal, 1) if bal else None}
     else:
         sign = D(1) if t == "purchase" else D(-1)
         m = FodderMovement(organization_id=org_id, product_id=prod.id, movement_date=req.movement_date, movement_type=t, kg_delta=sign * kg,
                            value=req.value, destination_type=req.destination_type, destination_id=req.destination_id, destination_label=req.destination_label,
-                           customer_id=req.customer_id, reason=req.reason, created_by=user_id)
+                           customer_id=req.customer_id, reason=req.reason, production_cycle_id=pc, created_by=user_id)
     db.add(m); await db.flush()
     if t == "purchase" and req.post_to_finance and req.value:
         db.add(FinanceTransaction(organization_id=org_id, transaction_type="expense", category="feed", amount=req.value, transaction_date=req.movement_date,
-                                  activity=schemas.ACTIVITY_FODDER, description=f"Fodder purchase: {prod.name} {F(kg):,.0f} kg", reference_type="fodder_purchase", reference_id=m.id, created_by=user_id))
+                                  activity=schemas.ACTIVITY_FODDER, description=f"Fodder purchase: {prod.name} {F(kg):,.0f} kg", reference_type="fodder_purchase", reference_id=m.id, production_cycle_id=pc, created_by=user_id))
         result["posted_to_finance"] = True
     if t == "sale" and req.value:
         desc = f"Fodder sale: {prod.name} {F(kg):,.0f} kg"
         if req.customer_id:
             db.add(AccountEntry(organization_id=org_id, customer_id=req.customer_id, entry_type="charge", amount=req.value, entry_date=req.movement_date,
-                                reference_type="fodder_sale", reference_id=m.id, description=desc, activity=schemas.ACTIVITY_FODDER, created_by=user_id))
+                                reference_type="fodder_sale", reference_id=m.id, description=desc, activity=schemas.ACTIVITY_FODDER,
+                                production_cycle_id=pc, created_by=user_id))
             result["ledger"] = "charged_to_customer_account"
         else:
             db.add(FinanceTransaction(organization_id=org_id, transaction_type="income", category="fodder_sale", amount=req.value, transaction_date=req.movement_date,
-                                      activity=schemas.ACTIVITY_FODDER, description=desc, reference_type="fodder_sale", reference_id=m.id, created_by=user_id))
+                                      activity=schemas.ACTIVITY_FODDER, description=desc, reference_type="fodder_sale", reference_id=m.id, production_cycle_id=pc, created_by=user_id))
             result["ledger"] = "income_posted"
     await db.commit()
     return {"id": str(m.id), "balance_kg": round(bal + F(m.kg_delta), 2), **result}
 
 
-async def list_movements(db, org_id, product_id=None, start=None, end=None, limit=500):
+async def list_movements(db, org_id, product_id=None, start=None, end=None, limit=500, pcycle: CycleSel | None = None):
     q = select(FodderMovement, FodderProduct.name).join(FodderProduct, FodderProduct.id == FodderMovement.product_id).where(FodderMovement.organization_id == org_id)
     if product_id: q = q.where(FodderMovement.product_id == product_id)
     if start: q = q.where(FodderMovement.movement_date >= start)
     if end: q = q.where(FodderMovement.movement_date <= end)
+    if pcycle is not None:       # tagged to the cycle, or a harvest of a planting that is in it
+        q = q.where(_cycle_cond(cyc_resolve.fodder_movement_cycle(FodderMovement), pcycle))
     rows = (await db.execute(q.order_by(FodderMovement.movement_date.desc(), FodderMovement.created_at.desc()).limit(limit))).all()
     return [{"id": str(m.id), "date": m.movement_date.isoformat(), "product": n, "type": m.movement_type, "kg": F(m.kg_delta), "value": F(m.value) if m.value is not None else None,
-             "destination": m.destination_label or m.destination_type, "reason": m.reason} for m, n in rows]
+             "destination": m.destination_label or m.destination_type, "reason": m.reason,
+             "production_cycle_id": str(m.production_cycle_id) if m.production_cycle_id else None} for m, n in rows]
 
 
 # ----------------------------------------------------------------------------- the report
-async def summary(db, org_id, start: date, end: date) -> dict:
+async def summary(db, org_id, start: date, end: date, pcycle: CycleSel | None = None) -> dict:
     econ = await all_cycle_economics(db, org_id, end)
     stock = {s["product_id"]: s for s in await stock_position(db, org_id, end)}
     names = {p.id: p for p in (await db.execute(select(FodderProduct).where(FodderProduct.organization_id == org_id))).scalars()}
-    mv = list((await db.execute(select(FodderMovement).where(FodderMovement.organization_id == org_id, FodderMovement.movement_date >= start, FodderMovement.movement_date <= end))).scalars())
+    mvq = select(FodderMovement).where(FodderMovement.organization_id == org_id, FodderMovement.movement_date >= start, FodderMovement.movement_date <= end)
+    if pcycle is not None:
+        mvq = mvq.where(_cycle_cond(cyc_resolve.fodder_movement_cycle(FodderMovement), pcycle))
+    mv = list((await db.execute(mvq)).scalars())
     per = defaultdict(lambda: defaultdict(float))
     dest = defaultdict(lambda: defaultdict(float))
     for m in mv:
@@ -429,9 +446,11 @@ async def summary(db, org_id, start: date, end: date) -> dict:
                          "count_adjustment_kg": round(a.get("count_adjust", 0.0), 1),
                          "self_sufficiency_pct": round(100 * own / inflow, 1) if inflow else None,
                          "issued_by_destination": {k: round(v, 1) for k, v in dest.get(pid, {}).items()}, "closing_stock": stock.get(str(pid))})
-    cycles = (await db.execute(select(FodderCycle, FodderPlot.name, FodderProduct.name).join(FodderPlot, FodderPlot.id == FodderCycle.plot_id)
-                               .join(FodderProduct, FodderProduct.id == FodderCycle.product_id).where(FodderCycle.organization_id == org_id,
-                               FodderCycle.start_date <= end, (FodderCycle.end_date.is_(None)) | (FodderCycle.end_date >= start)))).all()
+    cq = apply_col(select(FodderCycle, FodderPlot.name, FodderProduct.name).join(FodderPlot, FodderPlot.id == FodderCycle.plot_id)
+                   .join(FodderProduct, FodderProduct.id == FodderCycle.product_id).where(FodderCycle.organization_id == org_id,
+                   FodderCycle.start_date <= end, (FodderCycle.end_date.is_(None)) | (FodderCycle.end_date >= start)),
+                   FodderCycle.production_cycle_id, pcycle)
+    cycles = (await db.execute(cq)).all()
     rows = [{"cycle": c.label, "plot": pn, "product": prn, "status": c.status, **{k: econ[c.id][k] for k in ("harvested_kg", "total_cost", "cost_per_kg", "yield_kg_per_acre", "replacement_value", "saving_vs_buying")}}
             for c, pn, prn in cycles if c.id in econ]
     sched = await investment_schedule(db, org_id, end)

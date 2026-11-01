@@ -8,11 +8,12 @@ import { Can } from "@/components/can";
 import { EditEntityModal } from "@/components/edit-entity-modal";
 import { useCan } from "@/lib/use-auth";
 import { Card, TagChip, StatusBadge, ErrorState, Button, Modal, Input, Select, Textarea } from "@/components/ui";
+import { CropMoneyTab } from "@/components/crop-money";
 import { apiFetch, ApiError } from "@/lib/api";
 import type { CropPlanting, CropEvent, HarvestRecord, CropPlantingProfitability } from "@/lib/types";
 import { clsx } from "clsx";
 
-const ALL_TABS = ["Overview", "Timeline", "Harvests"] as const;
+const ALL_TABS = ["Overview", "Timeline", "Harvests", "Money"] as const;
 type Tab = (typeof ALL_TABS)[number];
 
 // Mirrors apps/api/app/modules/crops/service.py's _ALLOWED_TRANSITIONS - kept
@@ -256,6 +257,8 @@ export default function CropPlantingDetailPage() {
           </Card>
         </div>
       )}
+
+      {tab === "Money" && <CropMoneyTab plantingId={id} />}
 
       <Modal open={harvestModalOpen} onClose={() => setHarvestModalOpen(false)} title="Record a harvest">
         <HarvestForm

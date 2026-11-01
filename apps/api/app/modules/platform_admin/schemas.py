@@ -48,9 +48,21 @@ class OrganizationSummaryOut(BaseModel):
     subscription_tier: str | None
     subscription_status: str | None
     created_at: datetime
+    # additive (plan management): the tier's stable slug and when the current period ends
+    subscription_tier_slug: str | None = None
+    subscription_period_end: datetime | None = None
 
     class Config:
         from_attributes = True
+
+
+class OrganizationSubscriptionUpdate(BaseModel):
+    """A superadmin setting a tenant's plan directly (no payment). `status` defaults to active and the period is
+    extended 30 days when it has already ended, so the new plan takes effect immediately."""
+    tier_slug: str
+    status: str | None = Field(default=None, pattern="^(trialing|active|past_due|cancelled)$")
+    current_period_end: datetime | None = None
+    reason: str | None = Field(default=None, max_length=300)
 
 
 class OrganizationStatusUpdate(BaseModel):

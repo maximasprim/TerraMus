@@ -44,12 +44,28 @@ async def on_payment_succeeded(payload: dict) -> None:
         order_id = uuid.UUID(payload["order_id"])
         amount = payload["amount"]
 
+        # An order made up only of crop produce is crop income, not livestock income. Orders with animals (or a
+        # mix) keep the existing category. Looked up before booking so the income lands in the right place.
+        category, activity, farm_id = "livestock_sale", None, None
+        try:
+            from sqlalchemy import select as _select
+            from app.modules.commerce.models import OrderItem
+            from app.modules.crops.models import CropPlanting
+            items = (await db.execute(_select(OrderItem.crop_planting_id).where(OrderItem.order_id == order_id))).scalars().all()
+            if items and all(i is not None for i in items):
+                category, activity = "crop_sale", "crops"
+                farms = set((await db.execute(_select(CropPlanting.farm_id).where(CropPlanting.id.in_(set(items))))).scalars().all())
+                farm_id = next(iter(farms)) if len(farms) == 1 else None
+        except Exception:
+            logger.exception("could not classify order %s; booking as livestock_sale", order_id)
+
         await service.record_transaction(
             db, org_id, None,
             schemas.FinanceTransactionCreate(
-                transaction_type="income", category="livestock_sale",
+                transaction_type="income", category=category,
                 amount=amount, transaction_date=date.today(),
                 description=f"Payment received for order {order_id}",
+                activity=activity, farm_id=farm_id,
             ),
             reference_type="order", reference_id=order_id,
         )

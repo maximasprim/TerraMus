@@ -17,6 +17,8 @@ from app.modules.customers.models import Customer
 from app.modules.finance.models import FinanceTransaction
 from app.modules.receivables import schemas
 from app.modules.receivables.models import AccountEntry
+from app.modules.cycles import resolve as cyc_resolve
+from app.modules.cycles.deps import CycleSel, cond as _cond
 
 _CATEGORY = {"feedlot_sale": "livestock_sale", "training_enrolment": "training_revenue", "crop_sale": "crop_sale",
              "fodder_sale": "fodder_sale", "group_sale": "other_revenue", "order": "other_revenue", "manual": "other_revenue"}
@@ -67,16 +69,25 @@ def _entry_out(e: AccountEntry) -> dict:
     return {"id": str(e.id), "type": e.entry_type, "amount": float(e.amount), "date": e.entry_date.isoformat(),
             "description": e.description, "method": e.method, "receipt_ref": e.receipt_ref,
             "reference_type": e.reference_type, "reference_id": str(e.reference_id) if e.reference_id else None,
-            "salesperson": e.salesperson, "activity": e.activity}
+            "salesperson": e.salesperson, "activity": e.activity,
+            "production_cycle_id": str(e.production_cycle_id) if e.production_cycle_id else None,
+            "effective_cycle_id": str(getattr(e, "effective_cycle_id", None) or "") or None}
 
 
-async def _entries(db, org_id, customer_id=None, as_of: date | None = None) -> list[AccountEntry]:
-    q = select(AccountEntry).where(AccountEntry.organization_id == org_id)
+async def _entries(db, org_id, customer_id=None, as_of: date | None = None,
+                   cycle: CycleSel | None = None) -> list[AccountEntry]:
+    q = select(AccountEntry, cyc_resolve.entry_cycle()).where(AccountEntry.organization_id == org_id)
     if customer_id:
         q = q.where(AccountEntry.customer_id == customer_id)
     if as_of:
         q = q.where(AccountEntry.entry_date <= as_of)
-    return list((await db.execute(q.order_by(AccountEntry.entry_date, AccountEntry.created_at))).scalars())
+    if cycle is not None:
+        q = q.where(cyc_resolve.entry_cond(cycle))
+    out = []
+    for e, eff in (await db.execute(q.order_by(AccountEntry.entry_date, AccountEntry.created_at))).all():
+        e.effective_cycle_id = eff
+        out.append(e)
+    return out
 
 
 async def add_charge(db, org_id, user_id, req: schemas.ChargeCreate) -> AccountEntry:
@@ -84,7 +95,7 @@ async def add_charge(db, org_id, user_id, req: schemas.ChargeCreate) -> AccountE
     e = AccountEntry(organization_id=org_id, customer_id=req.customer_id, entry_type="charge", amount=req.amount,
                      entry_date=req.entry_date, reference_type=req.reference_type, reference_id=req.reference_id,
                      description=req.description, farm_id=req.farm_id, activity=req.activity or _ACTIVITY.get(req.reference_type),
-                     salesperson=req.salesperson, created_by=user_id)
+                     salesperson=req.salesperson, production_cycle_id=req.production_cycle_id, created_by=user_id)
     db.add(e)
     await db.commit()
     return e
@@ -92,25 +103,27 @@ async def add_charge(db, org_id, user_id, req: schemas.ChargeCreate) -> AccountE
 
 async def add_payment(db, org_id, user_id, req: schemas.PaymentCreate) -> dict:
     await _customer(db, org_id, req.customer_id)
-    farm_id, activity = req.farm_id, req.activity
+    farm_id, activity, cycle_id = req.farm_id, req.activity, req.production_cycle_id
     if req.reference_id and req.reference_type:     # inherit the dimensions of the sale being paid
         ch = (await db.execute(select(AccountEntry).where(
             AccountEntry.organization_id == org_id, AccountEntry.entry_type == "charge",
             AccountEntry.reference_type == req.reference_type, AccountEntry.reference_id == req.reference_id))).scalars().first()
         if ch:
             farm_id, activity = farm_id or ch.farm_id, activity or ch.activity
+            cycle_id = cycle_id or ch.production_cycle_id       # (a charge with no tag is traced through its sale)
     activity = activity or _ACTIVITY.get(req.reference_type or "manual")
     before = await _entries(db, org_id, req.customer_id)
     bal_before = sum((D(e.amount) if e.entry_type == "charge" else -D(e.amount) for e in before), Decimal("0"))
     e = AccountEntry(organization_id=org_id, customer_id=req.customer_id, entry_type="payment", amount=req.amount,
                      entry_date=req.entry_date, reference_type=req.reference_type, reference_id=req.reference_id,
                      description=req.description, method=req.method, receipt_ref=req.receipt_ref, farm_id=farm_id,
-                     activity=activity, created_by=user_id)
+                     activity=activity, production_cycle_id=cycle_id, created_by=user_id)
     db.add(e)
     await db.flush()
     txn = FinanceTransaction(organization_id=org_id, transaction_type="income",
                              category=_CATEGORY.get(req.reference_type or "manual", "other_revenue"), amount=req.amount,
                              transaction_date=req.entry_date, farm_id=farm_id, activity=activity,
+                             production_cycle_id=cycle_id,
                              description=(req.description or "Customer payment") + (f" [{req.receipt_ref}]" if req.receipt_ref else ""),
                              reference_type="account_payment", reference_id=e.id, created_by=user_id)
     db.add(txn)
@@ -131,16 +144,16 @@ async def add_writeoff(db, org_id, user_id, req: schemas.WriteoffCreate) -> Acco
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"Cannot write off {req.amount}: the customer only owes {bal}")
     e = AccountEntry(organization_id=org_id, customer_id=req.customer_id, entry_type="writeoff", amount=req.amount,
                      entry_date=req.entry_date, reference_type=req.reference_type, reference_id=req.reference_id,
-                     description=req.description, created_by=user_id)
+                     description=req.description, production_cycle_id=req.production_cycle_id, created_by=user_id)
     db.add(e)
     await db.commit()
     return e
 
 
-async def statement(db, org_id, customer_id, as_of: date | None = None) -> dict:
+async def statement(db, org_id, customer_id, as_of: date | None = None, cycle: CycleSel | None = None) -> dict:
     cust = await _customer(db, org_id, customer_id)
     as_of = as_of or date.today()
-    entries = await _entries(db, org_id, customer_id, as_of)
+    entries = await _entries(db, org_id, customer_id, as_of, cycle)
     open_items, credit = fifo_open_items(entries)
     charged = sum((D(e.amount) for e in entries if e.entry_type == "charge"), Decimal("0"))
     paid = sum((D(e.amount) for e in entries if e.entry_type == "payment"), Decimal("0"))
@@ -155,9 +168,10 @@ async def statement(db, org_id, customer_id, as_of: date | None = None) -> dict:
             "ageing": age_buckets(open_items, as_of), "entries": lines}
 
 
-async def balances(db, org_id, as_of: date | None = None) -> dict:
+async def balances(db, org_id, as_of: date | None = None, cycle: CycleSel | None = None) -> dict:
+    """With a cycle: only that cycle's charges and the payments/write-offs traced to them."""
     as_of = as_of or date.today()
-    entries = await _entries(db, org_id, None, as_of)
+    entries = await _entries(db, org_id, None, as_of, cycle)
     by_c: dict[uuid.UUID, list[AccountEntry]] = defaultdict(list)
     for e in entries:
         by_c[e.customer_id].append(e)
@@ -181,17 +195,22 @@ async def balances(db, org_id, as_of: date | None = None) -> dict:
             "customers_owing": len(rows), "ageing": {k: round(v, 2) for k, v in total_ageing.items()}, "customers": rows}
 
 
-async def sales_by_salesperson(db, org_id, start: date, end: date) -> list[dict]:
+async def sales_by_salesperson(db, org_id, start: date, end: date, cycle: CycleSel | None = None) -> list[dict]:
     from app.modules.feedlot.models import FeedlotExit
     agg: dict[str, dict] = defaultdict(lambda: {"sales": 0, "amount": Decimal("0")})
-    for e in (await db.execute(select(FeedlotExit).where(FeedlotExit.organization_id == org_id, FeedlotExit.exit_type == "sold",
-                                                          FeedlotExit.exit_date >= start, FeedlotExit.exit_date <= end))).scalars():
+    exq = select(FeedlotExit).where(FeedlotExit.organization_id == org_id, FeedlotExit.exit_type == "sold",
+                                    FeedlotExit.exit_date >= start, FeedlotExit.exit_date <= end)
+    chq = select(AccountEntry).where(
+            AccountEntry.organization_id == org_id, AccountEntry.entry_type == "charge",
+            AccountEntry.reference_type != "feedlot_sale", AccountEntry.entry_date >= start, AccountEntry.entry_date <= end)
+    if cycle is not None:
+        exq = exq.where(_cond(cyc_resolve.exit_cycle(FeedlotExit.id), cycle))
+        chq = chq.where(cyc_resolve.entry_cond(cycle))
+    for e in (await db.execute(exq)).scalars():
         k = e.salesperson or "(not recorded)"
         agg[k]["sales"] += 1; agg[k]["amount"] += D(e.amount)
     # other credit sales recorded straight on accounts (feedlot sales are already counted above)
-    for e in (await db.execute(select(AccountEntry).where(
-            AccountEntry.organization_id == org_id, AccountEntry.entry_type == "charge",
-            AccountEntry.reference_type != "feedlot_sale", AccountEntry.entry_date >= start, AccountEntry.entry_date <= end))).scalars():
+    for e in (await db.execute(chq)).scalars():
         k = e.salesperson or "(not recorded)"
         agg[k]["sales"] += 1; agg[k]["amount"] += D(e.amount)
     return sorted(({"salesperson": k, "sales": v["sales"], "amount": float(v["amount"])} for k, v in agg.items()), key=lambda r: -r["amount"])

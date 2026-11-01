@@ -9,10 +9,12 @@ import { TagChip, StatusBadge, ErrorState, EmptyState, Button, Modal, Select } f
 import { ApiError, apiFetch, apiFetchAll, apiUpload } from "@/lib/api";
 import { useCatalog } from "@/lib/use-catalog";
 import { ModuleDisabledNotice } from "@/components/module-disabled-notice";
+import { CropMoneyTools } from "@/components/crop-money-tools";
 import type { CropPlanting, Farm, BulkImportResult } from "@/lib/types";
 
 export default function CropsListPage() {
   const [importOpen, setImportOpen] = useState(false);
+  const [moneyOpen, setMoneyOpen] = useState(false);
   const { data: catalog } = useCatalog();
   const moduleOff = catalog?.crops_enabled === false;
   const { data, isLoading, error } = useQuery<CropPlanting[]>({
@@ -28,6 +30,7 @@ export default function CropsListPage() {
           <p className="text-sm text-muted">Every plot/batch of a crop currently on record.</p>
         </div>
         <div className="flex gap-2">
+          {!moduleOff && <Can permission="crops.update"><Button variant="ghost" onClick={() => setMoneyOpen(true)}>Sales &amp; costs</Button></Can>}
           {!moduleOff && <Can permission="crops.create"><Button variant="ghost" onClick={() => setImportOpen(true)}>Import CSV</Button></Can>}
           {!moduleOff && <Can permission="crops.create"><Link href="/admin/crops/new">
             <Button>+ Register planting</Button>
@@ -87,6 +90,7 @@ export default function CropsListPage() {
       )}
 
       <CropsImportModal open={importOpen} onClose={() => setImportOpen(false)} />
+      <Modal open={moneyOpen} onClose={() => setMoneyOpen(false)} title="Crop sales &amp; costs"><CropMoneyTools /></Modal>
     </AdminShell>
   );
 }

@@ -30,6 +30,7 @@ class CropPlanting(Base, UUIDPKMixin, TimestampMixin):
     __tablename__ = "crop_plantings"
 
     organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    production_cycle_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("production_cycles.id"), nullable=True, index=True)
     farm_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("farms.id"), index=True)
     location_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("locations.id"), nullable=True
@@ -104,3 +105,57 @@ class HarvestRecord(Base, UUIDPKMixin):
     )
 
     planting: Mapped["CropPlanting"] = relationship(back_populates="harvests")
+
+
+# Crop cost categories are deliberately the same names the finance ledger uses, so a cost posts 1:1.
+CROP_COST_CATEGORIES = (
+    "seed", "fertilizer", "chemicals", "labour", "fuel", "transport", "equipment",
+    "maintenance", "lease", "insurance", "utilities", "other_expense",
+)
+# How costs roll up in the profitability view (matches CropPlantingProfitability's existing fields).
+INPUT_COST_CATEGORIES = ("seed", "fertilizer", "chemicals")
+LABOUR_COST_CATEGORIES = ("labour",)
+
+
+class CropSale(Base, UUIDPKMixin):
+    """Produce sold OUTSIDE the web shop (to a trader, co-operative, at the market...). Web sales are
+    not stored here: they already exist as order items linked to the planting. A wrong entry is voided
+    (kept, flagged, reversed in the ledger), never edited or deleted."""
+    __tablename__ = "crop_sales"
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    planting_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("crop_plantings.id"), index=True)
+    sale_date: Mapped[date] = mapped_column(Date, index=True)
+    quantity: Mapped[float] = mapped_column(Numeric(12, 2))
+    unit: Mapped[str] = mapped_column(String(16))
+    unit_price: Mapped[float] = mapped_column(Numeric(12, 2))
+    amount: Mapped[float] = mapped_column(Numeric(12, 2))
+    customer_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("customers.id"), nullable=True)
+    buyer_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    notes: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    source: Mapped[str] = mapped_column(String(16), default="manual")        # manual | import
+    import_key: Mapped[str | None] = mapped_column(String(64), nullable=True)  # makes imports idempotent
+    voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    void_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    voided_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+
+class CropCost(Base, UUIDPKMixin):
+    """A cost incurred on one planting (seed, fertiliser, labour, ...). Same void-not-edit rule as CropSale."""
+    __tablename__ = "crop_costs"
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    planting_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("crop_plantings.id"), index=True)
+    cost_date: Mapped[date] = mapped_column(Date, index=True)
+    category: Mapped[str] = mapped_column(String(24))
+    amount: Mapped[float] = mapped_column(Numeric(12, 2))
+    description: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    source: Mapped[str] = mapped_column(String(16), default="manual")
+    import_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    void_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    voided_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

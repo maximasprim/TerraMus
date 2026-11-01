@@ -4,16 +4,19 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createContext, useContext, useEffect } from "react";
 import { clsx } from "clsx";
-import { LayoutDashboard, BarChart3, Beef, Sprout, LogOut, MapPin, Users, Wheat, ShoppingCart, Tag, Package, Wallet, Truck, UserCog, Wrench, Search, Settings, UsersRound, CalendarClock, Bell, Newspaper, CreditCard, ExternalLink, Inbox, History, Bird, Scale, Receipt, Fuel, GraduationCap, Star } from "lucide-react";
+import { LayoutDashboard, BarChart3, Beef, Sprout, LogOut, MapPin, Users, Wheat, ShoppingCart, Tag, Package, Wallet, Truck, UserCog, Wrench, Search, Settings, UsersRound, CalendarClock, Bell, Newspaper, CreditCard, ExternalLink, Inbox, History, Bird, Scale, Receipt, Fuel, GraduationCap, Star, Layers } from "lucide-react";
 import { useRequireAuth, useLogout } from "@/lib/use-auth";
 import { canAccessPath, firstAccessiblePath } from "@/lib/permissions";
 import { useCatalog } from "@/lib/use-catalog";
 import { ShellFrame } from "@/components/shell-frame";
+import { CycleProvider } from "@/lib/cycle-context";
+import { CycleBanner, CycleSelector } from "@/components/cycle-selector";
 
 const NAV = [
   { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/admin/reports", label: "Reports", icon: BarChart3 },
   { href: "/admin/livestock", label: "Livestock", icon: Beef },
+  { href: "/admin/cycles", label: "Production Cycles", icon: Layers },
   { href: "/admin/feedlot", label: "Feedlot", icon: Scale },
   { href: "/admin/groups", label: "Flocks & Fish", icon: Bird },
   { href: "/admin/fodder", label: "Fodder", icon: Wheat },
@@ -53,9 +56,17 @@ function AdminShellFrame({ children }: { children: React.ReactNode }) {
   const { data: catalog } = useCatalog(ready);
   const moduleOff = (href: string) =>
     (href === "/admin/livestock" && catalog?.livestock_enabled === false) ||
-    (href === "/admin/crops" && catalog?.crops_enabled === false);
+    (href === "/admin/crops" && catalog?.crops_enabled === false) ||
+    menuHidden(href);
+  // Menus a platform admin has hidden for this organization (also fails open until /catalog loads). A hidden
+  // menu hides every page under it, so typing its address shows a notice instead of the page.
+  const hiddenMenus = catalog?.hidden_menus ?? [];
+  function menuHidden(path: string) {
+    return hiddenMenus.some((m) => path === m || path.startsWith(m + "/"));
+  }
   const pathname = usePathname();
   const router = useRouter();
+  const pageHidden = menuHidden(pathname);
 
   // Permission-aware UI (see lib/permissions.ts). `permissions` is undefined until
   // /auth/me has loaded, in which case everything is allowed - fail open.
@@ -76,12 +87,13 @@ function AdminShellFrame({ children }: { children: React.ReactNode }) {
   }
 
   return (
+    <CycleProvider>
     <ShellFrame
       sidebarClassName="bg-forest"
       mobileTitle={me?.organization.name}
-      mainClassName="p-4 sm:p-6 lg:p-8"
+      mainClassName="p-2 sm:p-2 lg:p-3"
       brand={
-        <div className="border-b border-white/10 px-6 py-5">
+        <div className="border-b border-white/10 px-6 py-2 mt-3">
           <p className="font-display text-lg italic text-center leading-tight">{me?.organization.name}</p>
           <p className="text-xs text-paper/60 leading-tight">{me?.user.full_name}</p>
           {me?.organization.slug && (
@@ -89,12 +101,13 @@ function AdminShellFrame({ children }: { children: React.ReactNode }) {
               href={`/shop/${me.organization.slug}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="mt-2 flex items-center gap-1 text-xs text-paper/70 hover:text-paper hover:underline"
+              className="mt-2 flex items-center gap-1 text-xs text-yellow-500 hover:text-yellow-400 hover:underline"
             >
               <ExternalLink size={12} />
               View public shop
             </a>
           )}
+          {canAccessPath(permissions, "/admin/cycles") && <div className="-mx-6 mt-2"><CycleSelector /></div>}
         </div>
       }
       nav={NAV.filter(({ href }) => canAccessPath(permissions, href) && !moduleOff(href)).map(({ href, label, icon: Icon }) => (
@@ -120,8 +133,21 @@ function AdminShellFrame({ children }: { children: React.ReactNode }) {
         </button>
       }
     >
-      {allowed ? (
-        children
+      {pageHidden ? (
+        <div className="mx-auto mt-16 max-w-md rounded-lg border border-hairline bg-white p-8 text-center">
+          <h1 className="font-display text-xl text-forest">This section isn&apos;t available</h1>
+          <p className="mt-2 text-sm text-muted">
+            It isn&apos;t part of your organization&apos;s plan. Contact your platform administrator if you need it.
+          </p>
+          <Link href={firstAccessiblePath(permissions)} className="mt-5 inline-block rounded-md bg-forest px-5 py-2.5 text-sm font-medium text-paper hover:bg-forest/90">
+            Go to my workspace
+          </Link>
+        </div>
+      ) : allowed ? (
+        <>
+          <CycleBanner />
+          {children}
+        </>
       ) : sendToLanding ? (
         <p className="text-sm text-muted">Taking you to your workspace…</p>
       ) : (
@@ -136,6 +162,7 @@ function AdminShellFrame({ children }: { children: React.ReactNode }) {
         </div>
       )}
     </ShellFrame>
+    </CycleProvider>
   );
 }
 

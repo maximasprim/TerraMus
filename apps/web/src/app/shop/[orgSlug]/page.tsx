@@ -89,23 +89,7 @@ export default function ShopHomePage() {
           <SectionHeading title="Shop by category" subtitle="Find exactly what you need" href={shopPath(orgSlug, "/store")} linkText="Browse everything" />
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
             {categories.map((c) => (
-              <Link
-                key={`${c.kind}:${c.key}`}
-                href={shopPath(orgSlug, `/store?kind=${c.kind}&category=${encodeURIComponent(c.key)}`)}
-                className="group flex flex-col items-center gap-2 rounded-2xl border border-hairline bg-white p-4 text-center transition-shadow hover:shadow-md"
-              >
-                <span
-                  className={`flex h-16 w-16 items-center justify-center rounded-full ${
-                    c.kind === "animal" ? "bg-amber-50 text-brass" : "bg-emerald-50 text-forest"
-                  }`}
-                >
-                  <CategoryIcon kind={c.kind} categoryKey={c.key} className="h-8 w-8" />
-                </span>
-                <span className="text-sm font-medium capitalize text-ink group-hover:text-forest">{humanize(c.key)}</span>
-                <span className="text-xs text-muted">
-                  {c.count} {c.count === 1 ? "item" : "items"}
-                </span>
-              </Link>
+              <CategoryTile key={`${c.kind}:${c.key}`} orgSlug={orgSlug} kind={c.kind} categoryKey={c.key} count={c.count} />
             ))}
           </div>
         </section>
@@ -307,6 +291,7 @@ function Hero({
           tone="bg-emerald-50 text-forest"
           kind="crop_produce"
           icon="crop"
+          image="/images/shop/tea.jpg"
         />
         <PromoTile
           href={shopPath(orgSlug, "/store?kind=animal")}
@@ -315,9 +300,78 @@ function Hero({
           tone="bg-amber-50 text-brass"
           kind="animal"
           icon="animal"
+          image="/images/shop/sheep.jpg"
         />
       </div>
     </section>
+  );
+}
+
+/** Fades a photo's edges into the card behind it, so no border or corner shows. */
+const PHOTO_FADE: React.CSSProperties = {
+  WebkitMaskImage: "radial-gradient(closest-side, #000 55%, transparent 100%)",
+  maskImage: "radial-gradient(closest-side, #000 55%, transparent 100%)",
+};
+
+/** True only once `src` has actually loaded. Probing with a detached Image (rather than an <img onError>) is
+ * deliberate: a broken <img> in server-rendered HTML can fail before React attaches its handler, which would leave
+ * a broken-image box on screen. Until the photo has loaded - and forever if it is missing - callers show the icon. */
+function usePhotoLoaded(src: string | undefined): boolean {
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    setLoaded(false);
+    if (!src) return;
+    let cancelled = false;
+    const probe = new window.Image();
+    probe.onload = () => { if (!cancelled) setLoaded(true); };
+    probe.onerror = () => { if (!cancelled) setLoaded(false); };
+    probe.src = src;
+    return () => { cancelled = true; probe.onload = null; probe.onerror = null; };
+  }, [src]);
+  return loaded;
+}
+
+/** Photo for a "Shop by category" tile: a file named after the category in /public/images/shop/categories/
+ * (cattle.jpg, goat.jpg, tea.jpg ...). It replaces the round icon only; the card is otherwise unchanged. A category
+ * with no photo keeps its icon, so photos can be added one category at a time. */
+const categoryPhoto = (key: string) =>
+  `/images/shop/categories/${key.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "other"}.jpg`;
+
+function CategoryTile({
+  orgSlug,
+  kind,
+  categoryKey: key,
+  count,
+}: {
+  orgSlug: string;
+  kind: PublicListing["listing_kind"];
+  categoryKey: string;
+  count: number;
+}) {
+  const photo = categoryPhoto(key);
+  const hasPhoto = usePhotoLoaded(photo);
+  return (
+    <Link
+      href={shopPath(orgSlug, `/store?kind=${kind}&category=${encodeURIComponent(key)}`)}
+      className="group flex flex-col items-center gap-2 rounded-2xl border border-hairline bg-white p-4 text-center transition-shadow hover:shadow-md"
+    >
+      {hasPhoto ? (
+        // eslint-disable-next-line @next/next/no-img-element -- static photo from /public (already known to load)
+        <img src={photo} alt="" style={PHOTO_FADE} className="h-20 w-20 object-cover" />
+      ) : (
+        <span
+          className={`flex h-16 w-16 items-center justify-center rounded-full ${
+            kind === "animal" ? "bg-amber-50 text-brass" : "bg-emerald-50 text-forest"
+          }`}
+        >
+          <CategoryIcon kind={kind} categoryKey={key} className="h-8 w-8" />
+        </span>
+      )}
+      <span className="text-sm font-medium capitalize text-ink group-hover:text-forest">{humanize(key)}</span>
+      <span className="text-xs text-muted">
+        {count} {count === 1 ? "item" : "items"}
+      </span>
+    </Link>
   );
 }
 
@@ -328,6 +382,7 @@ function PromoTile({
   tone,
   kind,
   icon,
+  image,
 }: {
   href: string;
   title: string;
@@ -335,13 +390,21 @@ function PromoTile({
   tone: string;
   kind: PublicListing["listing_kind"];
   icon: "crop" | "animal";
+  /** Optional photo (a file in /public) shown in place of the icon. Missing or broken -> the icon stays. */
+  image?: string;
 }) {
+  const hasPhoto = usePhotoLoaded(image);
   return (
     <Link
       href={href}
       className={`flex flex-col justify-between rounded-xl border border-hairline p-5 transition-shadow hover:shadow-md ${tone}`}
     >
-      <CategoryIcon kind={kind} categoryKey={icon === "crop" ? "vegetable" : "cattle"} className="h-12 w-12" />
+      {hasPhoto ? (
+        // eslint-disable-next-line @next/next/no-img-element -- static photo from /public (already known to load)
+        <img src={image} alt="" style={PHOTO_FADE} className="h-20 w-20 object-cover" />
+      ) : (
+        <CategoryIcon kind={kind} categoryKey={icon === "crop" ? "vegetable" : "cattle"} className="h-12 w-12" />
+      )}
       <div className="mt-6">
         <p className="font-display text-xl text-ink">{title}</p>
         <p className="text-sm text-muted">{text}</p>

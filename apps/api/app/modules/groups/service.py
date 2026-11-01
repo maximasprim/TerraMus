@@ -12,6 +12,7 @@ from app.modules.finance.models import FinanceTransaction
 from app.modules.groups import schemas
 from app.modules.groups.models import AnimalGroup, GroupRecord
 from app.modules.receivables.models import AccountEntry
+from app.modules.cycles.deps import CycleSel, apply_col, ensure_writable
 
 D = lambda x: Decimal(str(x))
 _ACTIVITY = {"poultry": "poultry", "rabbits": "rabbits", "fish": "fish"}
@@ -26,7 +27,8 @@ def _group_out(g: AnimalGroup) -> dict:
     return {"id": str(g.id), "code": g.code, "name": g.name, "species": g.species, "purpose": g.purpose, "breed": g.breed,
             "source": g.source, "farm_id": str(g.farm_id) if g.farm_id else None, "start_date": g.start_date.isoformat(),
             "initial_count": g.initial_count, "current_count": g.current_count, "acquisition_cost": float(g.acquisition_cost),
-            "status": g.status, "closed_on": g.closed_on.isoformat() if g.closed_on else None, "notes": g.notes}
+            "status": g.status, "closed_on": g.closed_on.isoformat() if g.closed_on else None, "notes": g.notes,
+            "production_cycle_id": str(g.production_cycle_id) if g.production_cycle_id else None}
 
 
 async def _get(db, org_id, group_id) -> AnimalGroup:
@@ -39,13 +41,15 @@ async def _get(db, org_id, group_id) -> AnimalGroup:
 async def create_group(db, org_id, req: schemas.GroupCreate) -> dict:
     if (await db.execute(select(AnimalGroup.id).where(AnimalGroup.organization_id == org_id, AnimalGroup.code == req.code))).first():
         raise HTTPException(status.HTTP_409_CONFLICT, f"A group with code '{req.code}' already exists")
+    await ensure_writable(db, org_id, req.production_cycle_id)
     g = AnimalGroup(organization_id=org_id, current_count=req.initial_count, **req.model_dump())
     db.add(g); await db.commit()
     return _group_out(g)
 
 
-async def list_groups(db, org_id, species=None, state=None) -> list[dict]:
-    q = select(AnimalGroup).where(AnimalGroup.organization_id == org_id).order_by(AnimalGroup.start_date.desc())
+async def list_groups(db, org_id, species=None, state=None, cycle: CycleSel | None = None) -> list[dict]:
+    q = apply_col(select(AnimalGroup).where(AnimalGroup.organization_id == org_id), AnimalGroup.production_cycle_id, cycle)
+    q = q.order_by(AnimalGroup.start_date.desc())
     if species: q = q.where(AnimalGroup.species == species)
     if state: q = q.where(AnimalGroup.status == state)
     return [_group_out(g) for g in (await db.execute(q)).scalars()]
@@ -76,12 +80,14 @@ async def add_record(db, org_id, user_id, group_id, req: schemas.RecordCreate) -
         desc = f"{g.name}: {req.quantity:g} {req.unit or req.product or ''}".strip()
         if req.customer_id:
             db.add(AccountEntry(organization_id=org_id, customer_id=req.customer_id, entry_type="charge", amount=req.value, entry_date=req.record_date,
-                                reference_type="group_sale", reference_id=r.id, description=desc, farm_id=g.farm_id, activity=activity, created_by=user_id))
+                                reference_type="group_sale", reference_id=r.id, description=desc, farm_id=g.farm_id, activity=activity,
+                                production_cycle_id=g.production_cycle_id, created_by=user_id))
             posted = "charged_to_customer_account"
         else:
             db.add(FinanceTransaction(organization_id=org_id, transaction_type="income", category=_sale_category(g.species, req.product),
                                       amount=req.value, transaction_date=req.record_date, farm_id=g.farm_id, activity=activity, description=desc,
-                                      reference_type="group_sale", reference_id=r.id, created_by=user_id))
+                                      reference_type="group_sale", reference_id=r.id,
+                                      production_cycle_id=g.production_cycle_id, created_by=user_id))
             posted = "income_posted"
     warn = None
     if g.current_count == 0 and g.status == "active":

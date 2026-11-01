@@ -11,6 +11,7 @@ import { platformApiFetch, PlatformApiError } from "@/lib/platform-api";
 import { usePlatformMe } from "@/lib/use-platform-auth";
 import type {
   OrganizationSummaryOut,
+  PlatformMenuEntry,
   TenantCatalogSettings,
   TenantCatalogSettingsUpdate,
 } from "@/lib/platform-types";
@@ -25,6 +26,7 @@ interface Draft {
   species: string[];
   restrictCrops: boolean;
   cropTypes: string[];
+  hiddenMenus: string[]; // sidebar paths hidden for this organization ([] = all shown)
 }
 
 function toDraft(s: TenantCatalogSettings): Draft {
@@ -35,6 +37,7 @@ function toDraft(s: TenantCatalogSettings): Draft {
     species: s.enabled_species ?? [],
     restrictCrops: s.enabled_crop_types !== null,
     cropTypes: s.enabled_crop_types ?? [],
+    hiddenMenus: s.hidden_menus ?? [],
   };
 }
 
@@ -57,6 +60,7 @@ function buildPatch(d: Draft, s: TenantCatalogSettings, order: { species: string
   } else if (s.enabled_crop_types === null || !sameSet(d.cropTypes, s.enabled_crop_types)) {
     body.enabled_crop_types = order.crops.filter((c) => d.cropTypes.includes(c));
   }
+  if (!sameSet(d.hiddenMenus, s.hidden_menus ?? [])) body.hidden_menus = d.hiddenMenus;
   return Object.keys(body).length ? body : null;
 }
 
@@ -184,6 +188,12 @@ export default function OrganizationCatalogPage() {
     staleTime: 5 * 60_000,
   });
 
+  const menusQuery = useQuery<PlatformMenuEntry[]>({
+    queryKey: ["platform-catalog-menus"],
+    queryFn: () => platformApiFetch<PlatformMenuEntry[]>("/api/v1/platform/catalog/menus"),
+    staleTime: 5 * 60_000,
+  });
+
   const [draft, setDraft] = useState<Draft | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -237,7 +247,7 @@ export default function OrganizationCatalogPage() {
   };
   const toggleIn = (list: string[], code: string) => (list.includes(code) ? list.filter((c) => c !== code) : [...list, code]);
 
-  const loadError = orgQuery.error ?? settingsQuery.error ?? speciesQuery.error ?? cropsQuery.error;
+  const loadError = orgQuery.error ?? settingsQuery.error ?? speciesQuery.error ?? cropsQuery.error ?? menusQuery.error;
   if (loadError) {
     return (
       <PlatformShell>
@@ -245,7 +255,7 @@ export default function OrganizationCatalogPage() {
       </PlatformShell>
     );
   }
-  if (!orgQuery.data || !server || !draft || !speciesQuery.data || !cropsQuery.data) {
+  if (!orgQuery.data || !server || !draft || !speciesQuery.data || !cropsQuery.data || !menusQuery.data) {
     return (
       <PlatformShell>
         <p className="text-sm text-muted">Loading…</p>
@@ -265,6 +275,15 @@ export default function OrganizationCatalogPage() {
     return acc;
   }, {});
 
+  const menus = menusQuery.data;
+  const menuGroups = menus.reduce<Record<string, PlatformMenuEntry[]>>((acc, m) => {
+    (acc[m.group] ??= []).push(m);
+    return acc;
+  }, {});
+  const toggleMenu = (key: string) => update({ hiddenMenus: toggleIn(draft.hiddenMenus, key) });
+  const setMenuGroup = (keys: string[], visible: boolean) =>
+    update({ hiddenMenus: visible ? draft.hiddenMenus.filter((k) => !keys.includes(k)) : Array.from(new Set([...draft.hiddenMenus, ...keys])) });
+
   const setGroup = (codes: string[], on: boolean) =>
     update({ cropTypes: on ? Array.from(new Set([...draft.cropTypes, ...codes])) : draft.cropTypes.filter((c) => !codes.includes(c)) });
 
@@ -274,7 +293,7 @@ export default function OrganizationCatalogPage() {
         ← {org.name}
       </Link>
       <div className="mb-6 mt-2">
-        <h1 className="font-display text-2xl text-forest">Products &amp; catalog</h1>
+        <h1 className="font-display text-2xl text-forest">Products, catalog &amp; menus</h1>
         <p className="max-w-2xl text-sm text-muted">
           Choose what {org.name} can deal in. This limits what they can register from now on; animals and
           plantings they already have are never changed or hidden.
@@ -418,6 +437,59 @@ export default function OrganizationCatalogPage() {
             </div>
           )}
         </ModuleCard>
+
+        {/* ---------------------------------------------------------------- menus */}
+        <Card>
+          <h2 className="font-display text-xl text-forest">Menus</h2>
+          <p className="mt-0.5 text-sm text-muted">
+            Tick the sections {org.name} can see. An unticked section disappears from their sidebar, its pages show an
+            &ldquo;isn&apos;t available&rdquo; notice, and nothing new can be added to or changed in it (the same as
+            switching Livestock or Crops off). Records already there stay viewable, and the public shop is not affected.
+            Dashboard and Notifications are always shown.
+          </p>
+          <div className="mt-2 flex items-center justify-between text-xs text-muted">
+            <span>{menus.filter((m) => m.hideable && draft.hiddenMenus.includes(m.key)).length} hidden</span>
+            {!readOnly && (
+              <button type="button" className="hover:text-forest" onClick={() => update({ hiddenMenus: [] })}>
+                Show all
+              </button>
+            )}
+          </div>
+          <div className="mt-4 space-y-5 border-t border-hairline pt-5">
+            {Object.entries(menuGroups).map(([group, items]) => {
+              const keys = items.filter((m) => m.hideable).map((m) => m.key);
+              const shown = keys.filter((k) => !draft.hiddenMenus.includes(k)).length;
+              return (
+                <section key={group} aria-label={group}>
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <h3 className="text-sm font-medium text-ink">{group}</h3>
+                    {!readOnly && keys.length > 0 && (
+                      <button
+                        type="button"
+                        className="text-xs text-muted hover:text-forest"
+                        onClick={() => setMenuGroup(keys, shown !== keys.length)}
+                      >
+                        {shown === keys.length ? "Hide group" : "Show group"}
+                      </button>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    {items.map((m) => (
+                      <CheckTile
+                        key={m.key}
+                        title={m.label}
+                        hint={m.hideable ? undefined : "Always shown"}
+                        checked={!m.hideable || !draft.hiddenMenus.includes(m.key)}
+                        onChange={() => toggleMenu(m.key)}
+                        disabled={readOnly || !m.hideable}
+                      />
+                    ))}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
+        </Card>
       </div>
 
       {/* ---------------------------------------------------------------- save bar */}

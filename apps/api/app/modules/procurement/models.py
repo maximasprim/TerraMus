@@ -39,6 +39,7 @@ class PurchaseOrder(Base, UUIDPKMixin, TimestampMixin):
     __tablename__ = "purchase_orders"
 
     organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    production_cycle_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("production_cycles.id"), nullable=True, index=True)
     supplier_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("suppliers.id"), index=True)
     po_number: Mapped[str] = mapped_column(String(32), index=True)  # per-org sequential, like Invoice (finance module)
     status: Mapped[str] = mapped_column(String(16), default="requested", index=True)

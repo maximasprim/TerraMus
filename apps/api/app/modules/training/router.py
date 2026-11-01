@@ -9,6 +9,7 @@ from app.core.database import get_db
 from app.modules.identity.deps import require_permission
 from app.modules.identity.models import User
 from app.modules.training import schemas, service
+from app.modules.cycles.deps import CycleSel, cycle_filter
 
 router = APIRouter(prefix="/api/v1/training", tags=["training"])
 R, M = require_permission("training.read"), require_permission("training.manage")
@@ -31,8 +32,9 @@ async def update_course(course_id: uuid.UUID, req: schemas.CourseUpdate, user: U
 
 @router.get("/sessions")
 async def sessions(status: str | None = Query(None, pattern="^(scheduled|in_progress|completed|cancelled)$"), start_date: date | None = Query(None),
-                   end_date: date | None = Query(None), course_id: uuid.UUID | None = Query(None), user: User = Depends(R), db: AsyncSession = Depends(get_db)):
-    return await service.list_sessions(db, user.organization_id, status, start_date, end_date, course_id)
+                   end_date: date | None = Query(None), course_id: uuid.UUID | None = Query(None), user: User = Depends(R), db: AsyncSession = Depends(get_db),
+                   pcycle: CycleSel | None = Depends(cycle_filter)):
+    return await service.list_sessions(db, user.organization_id, status, start_date, end_date, course_id, pcycle)
 
 
 @router.post("/sessions", status_code=201)
@@ -77,5 +79,6 @@ async def certificate_pdf(enrolment_id: uuid.UUID, user: User = Depends(R), db: 
 
 
 @router.get("/summary")
-async def summary(start_date: date = Query(...), end_date: date = Query(...), user: User = Depends(R), db: AsyncSession = Depends(get_db)):
-    return await service.summary(db, user.organization_id, start_date, end_date)
+async def summary(start_date: date = Query(...), end_date: date = Query(...), user: User = Depends(R), db: AsyncSession = Depends(get_db),
+                  pcycle: CycleSel | None = Depends(cycle_filter)):
+    return await service.summary(db, user.organization_id, start_date, end_date, pcycle)

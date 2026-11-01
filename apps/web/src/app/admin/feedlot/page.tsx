@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AdminShell } from "@/components/admin-shell";
 import { Button, Card, EmptyState, ErrorState, Input, StatCard } from "@/components/ui";
 import { apiDownload, apiFetch, apiUpload, ApiError } from "@/lib/api";
+import { useCycle } from "@/lib/cycle-context";
 import { BatchesTab } from "./batches-tab";
 import { CostingTab } from "./costing-tab";
 import { SalesTab } from "./sales-tab";
@@ -333,12 +334,24 @@ function Worksheet() {
   const [asOf, setAsOf] = useState("");
   const [exporting, setExporting] = useState(false);
   const [postToFinance, setPostToFinance] = useState(true);
+  // An import must say which production cycle it belongs to: batch numbers restart in every cycle.
+  const { cycles } = useCycle();
+  const [importCycle, setImportCycle] = useState("");
+  const [newCycleName, setNewCycleName] = useState("");
+  const openCycles = cycles.filter((c) => c.status !== "closed");
+  const createCycle = useMutation({
+    mutationFn: () => apiFetch<{ id: string }>("/api/v1/production-cycles", {
+      method: "POST", cycleScope: false, body: JSON.stringify({ name: newCycleName.trim(), status: "running" }) }),
+    onSuccess: (c) => { queryClient.invalidateQueries({ queryKey: ["production-cycles"] }); setImportCycle(c.id); setNewCycleName(""); setReport(null); setError(null); },
+    onError: (e) => setError(e instanceof Error ? e.message : "Could not create the cycle"),
+  });
   const run = useMutation({
     mutationFn: (dry: boolean) => {
       if (!file) throw new Error("Choose the .xlsx worksheet first");
+      if (!importCycle) throw new Error("Choose or create the production cycle this worksheet belongs to first");
       const fd = new FormData();
       fd.append("file", file);
-      return apiUpload<ImportReport>(`/api/v1/feedlot/worksheet/import?dry_run=${dry}&post_to_finance=${postToFinance}`, fd);
+      return apiUpload<ImportReport>(`/api/v1/feedlot/worksheet/import?dry_run=${dry}&post_to_finance=${postToFinance}&production_cycle_id=${importCycle}`, fd);
     },
     onSuccess: (d) => { setReport(d); setError(null); if (!d.dry_run && d.ok) queryClient.invalidateQueries({ queryKey: ["feedlot"] }); },
     onError: (e) => setError(e instanceof Error ? e.message : "Import failed"),
@@ -356,14 +369,28 @@ function Worksheet() {
         <h2 className="font-display text-lg text-forest">Import your worksheet</h2>
         <p className="text-sm text-muted">Reads the BATCH, Sales weight, register and costing sheets. Always preview first: nothing is saved until you press Import. Re-importing the same file changes nothing; a newer copy adds only what is new.</p>
         <input type="file" accept=".xlsx,.xlsm" onChange={(e) => { setFile(e.target.files?.[0] ?? null); setReport(null); }} className="block w-full text-sm" />
+        <div className="space-y-2 rounded-md border border-hairline p-3">
+          <label className="block text-sm font-medium" htmlFor="import-cycle">Production cycle for this worksheet</label>
+          <select id="import-cycle" value={importCycle} onChange={(e) => { setImportCycle(e.target.value); setReport(null); }}
+                  className="block w-full rounded-md border border-hairline bg-white px-2 py-1.5 text-sm">
+            <option value="">Choose a cycle…</option>
+            {openCycles.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.status})</option>)}
+          </select>
+          <div className="flex gap-2">
+            <input value={newCycleName} onChange={(e) => setNewCycleName(e.target.value)} placeholder="…or name a new cycle, e.g. 2nd Production Cycle"
+                   className="block w-full rounded-md border border-hairline px-2 py-1.5 text-sm" />
+            <Button variant="ghost" disabled={!newCycleName.trim() || createCycle.isPending} onClick={() => createCycle.mutate()}>Create</Button>
+          </div>
+          <p className="text-xs text-muted">Batch numbers restart in every cycle, so the cycle must be chosen (or created) before you can preview or import.</p>
+        </div>
         <label className="flex items-start gap-2 text-sm">
           <input type="checkbox" className="mt-1" checked={postToFinance} onChange={(e) => { setPostToFinance(e.target.checked); setReport(null); }} />
           <span>Also record the <b>new</b> sales and purchases in Finance, dated on the day they happened. Each is recorded once only, so re-importing never doubles anything.</span>
         </label>
         {error && <ErrorState message={error} />}
         <div className="flex gap-2">
-          <Button variant="ghost" disabled={!file || run.isPending} onClick={() => run.mutate(true)}>Preview</Button>
-          <Button disabled={!file || run.isPending || !report || !report.dry_run || !report.ok} onClick={() => run.mutate(false)}>Import</Button>
+          <Button variant="ghost" disabled={!file || !importCycle || run.isPending} onClick={() => run.mutate(true)}>Preview</Button>
+          <Button disabled={!file || !importCycle || run.isPending || !report || !report.dry_run || !report.ok} onClick={() => run.mutate(false)}>Import</Button>
         </div>
         {report && (
           <div className="space-y-3 border-t border-hairline pt-3 text-sm">

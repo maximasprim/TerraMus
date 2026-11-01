@@ -60,6 +60,7 @@ class CycleCreate(BaseModel):
     acres: Decimal | None = Field(default=None, gt=0)          # defaults to the whole plot
     budget_name: str | None = Field(default=None, max_length=160)
     notes: str | None = None
+    production_cycle_id: uuid.UUID | None = None      # the production cycle ("Cycle 1") this planting belongs to
 
 
 class CycleClose(BaseModel):
@@ -115,6 +116,7 @@ class MovementCreate(BaseModel):
     customer_id: uuid.UUID | None = None                       # a sale on credit
     reason: str | None = Field(default=None, max_length=255)
     post_to_finance: bool = True
+    production_cycle_id: uuid.UUID | None = None
 
     @model_validator(mode="after")
     def _rules(self):

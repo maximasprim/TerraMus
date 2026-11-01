@@ -43,6 +43,7 @@ class StockMovement(Base, UUIDPKMixin):
     __tablename__ = "stock_movements"
 
     organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    production_cycle_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("production_cycles.id"), nullable=True, index=True)
     item_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("inventory_items.id"), index=True)
 
     movement_type: Mapped[str] = mapped_column(String(32), index=True)

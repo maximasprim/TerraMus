@@ -224,7 +224,7 @@ async def set_organization_domain(
     db: AsyncSession = Depends(get_db),
 ):
     """Sets/replaces this org's custom storefront domain and issues a fresh
-    DNS TXT ownership-verification token. Does not mark it verified — call
+    DNS TXT ownership-verification token. Does not mark it verified - call
     POST /domain/verify once the TXT record is published."""
     return await service.set_organization_domain(db, user.organization_id, req.domain)
 
@@ -243,7 +243,7 @@ async def verify_organization_domain(
     db: AsyncSession = Depends(get_db),
 ):
     """Checks the DNS TXT record and flips domain_verified to True if it
-    matches — safe to call repeatedly while waiting for DNS propagation."""
+    matches - safe to call repeatedly while waiting for DNS propagation."""
     return await service.verify_organization_domain(db, user.organization_id)
 
 

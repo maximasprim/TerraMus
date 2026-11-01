@@ -18,6 +18,7 @@ class IntakeBatchBase(BaseModel):
     other_fees: Decimal = Field(default=Decimal("0"), ge=0)
     handlers_cost: Decimal = Field(default=Decimal("0"), ge=0)
     notes: str | None = None
+    production_cycle_id: uuid.UUID | None = None
 
 
 class IntakeBatchCreate(IntakeBatchBase):
@@ -36,6 +37,7 @@ class IntakeBatchUpdate(BaseModel):
     other_fees: Decimal | None = Field(default=None, ge=0)
     handlers_cost: Decimal | None = Field(default=None, ge=0)
     notes: str | None = None
+    production_cycle_id: uuid.UUID | None = None
 
 
 class IntakeBatchOut(BaseModel):
@@ -55,6 +57,7 @@ class IntakeBatchOut(BaseModel):
     notes: str | None
     landed_cost: float
     landed_cost_per_head: float
+    production_cycle_id: uuid.UUID | None = None
     head_registered: int = 0
     head_active: int = 0
 
@@ -66,6 +69,7 @@ class SaleBatchCreate(BaseModel):
     buyer_name: str | None = None
     customer_id: uuid.UUID | None = None
     notes: str | None = None
+    production_cycle_id: uuid.UUID | None = None
 
 
 class SaleBatchUpdate(BaseModel):
@@ -74,6 +78,7 @@ class SaleBatchUpdate(BaseModel):
     buyer_name: str | None = None
     customer_id: uuid.UUID | None = None
     notes: str | None = None
+    production_cycle_id: uuid.UUID | None = None
 
 
 class SaleBatchOut(BaseModel):
@@ -85,6 +90,7 @@ class SaleBatchOut(BaseModel):
     buyer_name: str | None
     customer_id: uuid.UUID | None
     notes: str | None
+    production_cycle_id: uuid.UUID | None = None
     head_sold: int = 0
     total_weight_kg: float = 0.0
     total_amount: float = 0.0
@@ -176,6 +182,7 @@ class CostingDocumentCreate(BaseModel):
     kind: str = Field(pattern="^(settings|recipe|enterprise_budget|ration_plan|overhead_pool|land_use)$")
     name: str = Field(min_length=1, max_length=160)
     data: dict[str, Any] = Field(default_factory=dict)
+    production_cycle_id: uuid.UUID | None = Field(default=None, description="Make this a cycle-specific document (omit = applies to every cycle)")
 
 
 class CostingDocumentUpdate(BaseModel):
@@ -190,4 +197,5 @@ class CostingDocumentOut(BaseModel):
     name: str
     data: dict[str, Any]
     computed: dict[str, Any] | None = None
+    production_cycle_id: uuid.UUID | None = None
     updated_at: datetime

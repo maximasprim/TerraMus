@@ -7,7 +7,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from app.core.config import get_settings
-from app.core.database import get_db
+from app.core.database import engine, get_db
+from app.core.timing import RequestTimingMiddleware, install_sql_timing
 from app.core.middleware import RequestContextMiddleware, SecurityHeadersMiddleware
 from app.core.security_checks import daraja_warnings, security_warnings
 from app.modules.commerce.storage import config_from_settings as storage_config, config_warning as storage_warning
@@ -16,6 +17,7 @@ from app.modules.identity.router import router as auth_router, users_router, aud
 from app.modules.farm.router import router as farm_router
 from app.modules.livestock.router import router as livestock_router
 from app.modules.crops.router import router as crops_router
+from app.modules.crops.economics_router import router as crop_economics_router
 from app.modules.catalog.router import router as catalog_router
 from app.modules.health.router import animal_health_router, health_router
 from app.modules.breeding.router import router as breeding_router, animal_breeding_router
@@ -32,7 +34,8 @@ from app.modules.finance.handlers import register_finance_event_handlers
 from app.modules.notifications.router import router as notifications_router
 from app.modules.notifications.handlers import register_notification_event_handlers
 from app.modules.reporting.router import router as reporting_router
-from app.modules.cms.router import router as cms_router
+from app.modules.cms.router import router as cms_router, media_router as cms_media_router
+from app.modules.catalog.menu_guard import enforce_menu_visibility
 from app.modules.public.router import router as public_router, domain_router
 from app.modules.accounts.router import public_account_router, account_router
 from app.modules.search.router import router as search_router
@@ -51,6 +54,7 @@ from app.modules.fodder.router import router as fodder_router
 from app.modules.training.router import router as training_router
 from app.modules.groups.router import router as groups_router
 from app.modules.fuel.router import router as fuel_router
+from app.modules.cycles.router import router as cycles_router
 from app.modules.feedback.router import public as feedback_public_router, staff as feedback_staff_router
 from app.modules.livestock.photo import router as animal_photo_router
 
@@ -137,6 +141,8 @@ app = FastAPI(
                  "Employees, Assets, Customer Accounts. "
                  "See docs/architecture.md for the full phase-by-phase build history.",
     lifespan=lifespan,
+    # refuses writes to a section a platform admin has hidden for the caller's organization (catalog/menu_guard.py)
+    dependencies=[Depends(enforce_menu_visibility)],
 )
 
 # Order matters: Starlette applies middleware in reverse registration order,
@@ -150,6 +156,8 @@ app.add_middleware(PrometheusMiddleware)  # spec §47 - before CORS so every res
 # other custom middleware doesn't matter for correctness. Grouped here with
 # the rest of the app's own middleware, ahead of CORS, for consistency.
 app.add_middleware(PlatformAuditMiddleware)
+install_sql_timing(engine)                # per-request SQL count/time (see core/timing.py); REQUEST_TIMING=false switches it off
+app.add_middleware(RequestTimingMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -168,6 +176,7 @@ app.include_router(organization_router)
 app.include_router(farm_router)
 app.include_router(livestock_router)
 app.include_router(crops_router)
+app.include_router(crop_economics_router)
 app.include_router(catalog_router)
 app.include_router(animal_health_router)
 app.include_router(health_router)
@@ -189,6 +198,7 @@ app.include_router(finance_router)
 app.include_router(notifications_router)
 app.include_router(reporting_router)
 app.include_router(cms_router)
+app.include_router(cms_media_router)
 app.include_router(public_router)
 app.include_router(domain_router)
 app.include_router(public_account_router)
@@ -203,6 +213,7 @@ app.include_router(fodder_router)
 app.include_router(training_router)
 app.include_router(groups_router)
 app.include_router(fuel_router)
+app.include_router(cycles_router)
 app.include_router(feedback_public_router)
 app.include_router(feedback_staff_router)
 app.include_router(animal_photo_router)

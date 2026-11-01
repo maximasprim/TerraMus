@@ -62,6 +62,7 @@ class FodderCycle(Base, UUIDPKMixin, TimestampMixin):
     __table_args__ = (CheckConstraint("acres > 0", name="positive_acres"), CheckConstraint("status in ('open','closed')", name="valid_status"),
                       CheckConstraint("end_date is null or end_date >= start_date", name="valid_dates"))
     organization_id: Mapped[uuid.UUID] = _uuid(index=True)
+    production_cycle_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("production_cycles.id"), nullable=True, index=True)
     plot_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("fodder_plots.id"), index=True)
     product_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("fodder_products.id"))
     label: Mapped[str] = mapped_column(String(120))
@@ -124,6 +125,7 @@ class FodderMovement(Base, UUIDPKMixin):
     __table_args__ = (CheckConstraint("movement_type in ('harvest','purchase','issue','sale','loss','count_adjust')", name="valid_type"),
                       CheckConstraint("kg_delta <> 0", name="nonzero_quantity"))
     organization_id: Mapped[uuid.UUID] = _uuid(index=True)
+    production_cycle_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("production_cycles.id"), nullable=True, index=True)
     product_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("fodder_products.id"), index=True)
     movement_date: Mapped[date] = mapped_column(Date, index=True)
     movement_type: Mapped[str] = mapped_column(String(12))

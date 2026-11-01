@@ -8,6 +8,7 @@ from app.core.database import get_db
 from app.modules.fodder import schemas, service
 from app.modules.identity.deps import get_user_permissions, require_permission
 from app.modules.identity.models import User
+from app.modules.cycles.deps import CycleSel, cycle_filter
 
 router = APIRouter(prefix="/api/v1/fodder", tags=["fodder"])
 READ, RECORD, MANAGE = require_permission("fodder.read"), require_permission("fodder.record"), require_permission("fodder.manage")
@@ -51,8 +52,9 @@ async def update_plot(plot_id: uuid.UUID, req: schemas.PlotUpdate, user: User = 
 
 
 @router.get("/cycles")
-async def cycles(state: str | None = Query(None, pattern="^(open|closed)$"), as_of: date | None = Query(None), user: User = Depends(READ), db: AsyncSession = Depends(get_db)):
-    return await service.list_cycles(db, user.organization_id, state, as_of)
+async def cycles(state: str | None = Query(None, pattern="^(open|closed)$"), as_of: date | None = Query(None), user: User = Depends(READ), db: AsyncSession = Depends(get_db),
+                 pcycle: CycleSel | None = Depends(cycle_filter)):
+    return await service.list_cycles(db, user.organization_id, state, as_of, pcycle)
 
 
 @router.post("/cycles", status_code=201)
@@ -104,8 +106,9 @@ async def stock(as_of: date | None = Query(None), user: User = Depends(READ), db
 
 @router.get("/movements")
 async def movements(product_id: uuid.UUID | None = Query(None), start_date: date | None = Query(None), end_date: date | None = Query(None),
-                    user: User = Depends(READ), db: AsyncSession = Depends(get_db)):
-    return await service.list_movements(db, user.organization_id, product_id, start_date, end_date)
+                    user: User = Depends(READ), db: AsyncSession = Depends(get_db),
+                    pcycle: CycleSel | None = Depends(cycle_filter)):
+    return await service.list_movements(db, user.organization_id, product_id, start_date, end_date, pcycle=pcycle)
 
 
 @router.post("/movements", status_code=201)
@@ -117,5 +120,6 @@ async def add_movement(req: schemas.MovementCreate, user: User = Depends(RECORD)
 
 
 @router.get("/summary")
-async def summary(start_date: date = Query(...), end_date: date = Query(...), user: User = Depends(READ), db: AsyncSession = Depends(get_db)):
-    return await service.summary(db, user.organization_id, start_date, end_date)
+async def summary(start_date: date = Query(...), end_date: date = Query(...), user: User = Depends(READ), db: AsyncSession = Depends(get_db),
+                  pcycle: CycleSel | None = Depends(cycle_filter)):
+    return await service.summary(db, user.organization_id, start_date, end_date, pcycle)

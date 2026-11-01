@@ -110,7 +110,8 @@ class ParsedWorkbook:
 # ----------------------------------------------------------------- intake sheets
 def _parse_intake(ws, pw: ParsedWorkbook, number: int) -> None:
     title = str(ws["A1"].value or "")
-    m = re.search(r"delivered\s+on\s+(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{2,4})", title, re.I)
+    # "Delivered on 3/09/2026" (cycle 1) and "Delivered to the farm on 3/09/2026" (cycle 2) are both accepted.
+    m = re.search(r"delivered\b[^\d]{0,40}?\bon\s+(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{2,4})", title, re.I)
     delivered = parse_dmy("/".join(m.groups())) if m else None
     if not delivered:
         pw.warn("sheet_skipped", ws.title, "Could not read 'Delivered on dd/mm/yyyy' from cell A1; sheet skipped")
@@ -261,6 +262,59 @@ def _parse_batch_costs(ws, pw: ParsedWorkbook) -> None:
             "transport_cost": _num(ws.cell(r, cols["transport"]).value) or 0.0,
             "other_fees": _num(ws.cell(r, cols["other"]).value) or 0.0,
             "handlers_cost": _num(ws.cell(r, cols["handlers"]).value) or 0.0}
+
+
+def _parse_acquisition_costs(ws, pw: ParsedWorkbook) -> None:
+    """Second-cycle 'BULLS ACQUISATION COST' sheet: one column per batch ('BATCH n') with labelled rows
+    (Bulls / Bulls purchase cost / Other expenses). Fills the same per-batch landed-cost fields the first
+    cycle's ' PROFITABILITY ' sheet does, so imported animals get their purchase cost and it reaches Finance.
+    The sheet's TOTAL column and its Total Cost / Money Assigned / Difference rows are derived figures and are
+    ignored. A ' PROFITABILITY ' sheet, when present, takes precedence."""
+    cols: dict[int, int] = {}
+    header_row = 0
+    for r in range(1, min(ws.max_row, 8) + 1):
+        found: dict[int, int] = {}
+        for c in range(2, ws.max_column + 1):
+            v = ws.cell(r, c).value
+            m = re.match(r"^\s*batch\s*(\d+)\s*$", v, re.I) if isinstance(v, str) else None
+            if m:
+                found[int(m.group(1))] = c
+        if found:
+            cols, header_row = found, r
+            break
+    if not cols:
+        pw.warn("sheet_skipped", ws.title, "Acquisition-cost table not recognised (no 'BATCH n' column headings)")
+        return
+    rows: dict[str, int] = {}
+    for r in range(header_row + 1, ws.max_row + 1):
+        a = ws.cell(r, 1).value
+        if not isinstance(a, str):
+            continue
+        t = _norm(a)
+        if t == "bulls" or t.startswith("no of bulls"):
+            key = "head"
+        elif "purchase" in t and "cost" in t:
+            key = "purchase_cost"
+        elif t.startswith("transport"):
+            key = "transport_cost"
+        elif t.startswith("other"):
+            key = "other_fees"
+        elif t.startswith("handler"):
+            key = "handlers_cost"
+        else:
+            continue
+        rows.setdefault(key, r)
+    if "purchase_cost" not in rows:
+        pw.warn("sheet_skipped", ws.title, "Acquisition-cost table has no 'Bulls purchase cost' row")
+        return
+
+    def val(key: str, c: int) -> float:
+        return (_num(ws.cell(rows[key], c).value) or 0.0) if key in rows else 0.0
+
+    for num, c in cols.items():
+        pw.batch_costs.setdefault(num, {
+            "head": int(val("head", c)), "purchase_cost": val("purchase_cost", c), "transport_cost": val("transport_cost", c),
+            "other_fees": val("other_fees", c), "handlers_cost": val("handlers_cost", c)})
 
 
 def _parse_prices(ws_formulas, pw: ParsedWorkbook) -> None:
@@ -449,6 +503,8 @@ def parse_workbook(content: bytes) -> ParsedWorkbook:
             safe(_parse_batch_costs, name, wbv[name], pw)
         elif "profitability per bull" in n:
             safe(_parse_prices, name, wbf[name], pw)
+        elif "acquisation" in n or "acquisition" in n:      # (sic) the workbook spells it "ACQUISATION"
+            safe(_parse_acquisition_costs, name, wbv[name], pw)
     if "concentrate" in by_norm: safe(_parse_recipe, "CONCENTRATE", wbv[by_norm["concentrate"]], pw)
     if "hay" in by_norm: safe(_parse_budget_blocks, "HAY", wbf[by_norm["hay"]], wbv[by_norm["hay"]], pw, [], "bale")
     for k, v in by_norm.items():

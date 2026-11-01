@@ -8,14 +8,16 @@ from app.core.database import get_db
 from app.modules.feedlot import schemas, service
 from app.modules.identity.deps import require_permission
 from app.modules.identity.models import User
+from app.modules.cycles.deps import CycleSel, cycle_filter
 
 router = APIRouter(prefix="/api/v1/feedlot", tags=["feedlot"])
 
 
 # ---- intake batches
 @router.get("/intake-batches", response_model=list[schemas.IntakeBatchOut])
-async def list_intake_batches(user: User = Depends(require_permission("feedlot.read")), db: AsyncSession = Depends(get_db)):
-    return await service.list_intake_batches(db, user.organization_id)
+async def list_intake_batches(user: User = Depends(require_permission("feedlot.read")), db: AsyncSession = Depends(get_db),
+                              cycle: CycleSel | None = Depends(cycle_filter)):
+    return await service.list_intake_batches(db, user.organization_id, cycle)
 
 
 @router.post("/intake-batches", response_model=schemas.IntakeBatchOut, status_code=201)
@@ -52,8 +54,9 @@ async def link_animals(batch_id: uuid.UUID, req: schemas.LinkExistingRequest,
 
 # ---- sale batches
 @router.get("/sale-batches", response_model=list[schemas.SaleBatchOut])
-async def list_sale_batches(user: User = Depends(require_permission("feedlot.read")), db: AsyncSession = Depends(get_db)):
-    return await service.list_sale_batches(db, user.organization_id)
+async def list_sale_batches(user: User = Depends(require_permission("feedlot.read")), db: AsyncSession = Depends(get_db),
+                            cycle: CycleSel | None = Depends(cycle_filter)):
+    return await service.list_sale_batches(db, user.organization_id, cycle)
 
 
 @router.post("/sale-batches", response_model=schemas.SaleBatchOut, status_code=201)
@@ -107,30 +110,33 @@ async def record_weigh_day(req: schemas.BulkWeighRequest, user: User = Depends(r
 
 
 @router.get("/weigh-days")
-async def list_weigh_days(user: User = Depends(require_permission("feedlot.read")), db: AsyncSession = Depends(get_db)):
-    return await service.list_weigh_sessions(db, user.organization_id)
+async def list_weigh_days(user: User = Depends(require_permission("feedlot.read")), db: AsyncSession = Depends(get_db),
+                          cycle: CycleSel | None = Depends(cycle_filter)):
+    return await service.list_weigh_sessions(db, user.organization_id, cycle=cycle)
 
 
 # ---- analytics
 @router.get("/performance")
 async def performance(as_of: date | None = Query(None), intake_batch_id: uuid.UUID | None = Query(None),
                       sale_batch_id: uuid.UUID | None = Query(None), state: str | None = Query(None, pattern="^(active|sold|culled|died)$"),
-                      user: User = Depends(require_permission("feedlot.read")), db: AsyncSession = Depends(get_db)):
-    return await service.performance(db, user.organization_id, as_of, intake_batch_id, sale_batch_id, state)
+                      user: User = Depends(require_permission("feedlot.read")), db: AsyncSession = Depends(get_db),
+                      cycle: CycleSel | None = Depends(cycle_filter)):
+    return await service.performance(db, user.organization_id, as_of, intake_batch_id, sale_batch_id, state, cycle)
 
 
 @router.get("/profitability")
 async def profitability(as_of: date | None = Query(None), intake_batch_id: uuid.UUID | None = Query(None),
                         sale_batch_id: uuid.UUID | None = Query(None),
-                        user: User = Depends(require_permission("feedlot.read")), db: AsyncSession = Depends(get_db)):
-    return await service.profitability(db, user.organization_id, as_of, intake_batch_id, sale_batch_id)
+                        user: User = Depends(require_permission("feedlot.read")), db: AsyncSession = Depends(get_db),
+                        cycle: CycleSel | None = Depends(cycle_filter)):
+    return await service.profitability(db, user.organization_id, as_of, intake_batch_id, sale_batch_id, cycle)
 
 
 # ---- costing documents
 @router.get("/costing", response_model=list[schemas.CostingDocumentOut])
 async def list_costing(kind: str | None = Query(None), user: User = Depends(require_permission("feedlot.read")),
-                       db: AsyncSession = Depends(get_db)):
-    return await service.list_costing_docs(db, user.organization_id, kind)
+                       db: AsyncSession = Depends(get_db), cycle: CycleSel | None = Depends(cycle_filter)):
+    return await service.list_costing_docs(db, user.organization_id, kind, cycle)
 
 
 @router.post("/costing", response_model=schemas.CostingDocumentOut, status_code=201)
@@ -164,6 +170,7 @@ async def import_worksheet(
     farm_id: uuid.UUID | None = Query(None),
     include_costing: bool = Query(True),
     post_to_finance: bool = Query(True, description="Also record the NEW sales and purchases in Finance (each at most once)."),
+    production_cycle_id: uuid.UUID | None = Query(None, description="Put the imported batches, sale batches and costing documents into this production cycle."),
     user: User = Depends(require_permission("feedlot.manage")),
     db: AsyncSession = Depends(get_db),
 ):
@@ -174,7 +181,8 @@ async def import_worksheet(
     if len(content) > MAX_WORKSHEET_BYTES:
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Workbook is larger than 15 MB")
     return await run_import(db, user.organization_id, user.id, content, farm_id=farm_id,
-                            dry_run=dry_run, include_costing=include_costing, post_to_finance=post_to_finance)
+                            dry_run=dry_run, include_costing=include_costing, post_to_finance=post_to_finance,
+                            production_cycle_id=production_cycle_id)
 
 
 @router.post("/ledger-sync")
@@ -199,10 +207,11 @@ async def export_worksheet(
     as_of: date | None = Query(None, description="Report as at this date (default: latest weigh/sale date)"),
     user: User = Depends(require_permission("feedlot.read")),
     db: AsyncSession = Depends(get_db),
+    cycle: CycleSel | None = Depends(cycle_filter),
 ):
     from fastapi.responses import Response
     from app.modules.feedlot.worksheet_export import export_worksheet as build
-    content, meta = await build(db, user.organization_id, as_of)
+    content, meta = await build(db, user.organization_id, as_of, cycle)
     name = f"Bulls_WG_Worksheet_{meta['as_of']}.xlsx"
     return Response(content, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     headers={"Content-Disposition": f'attachment; filename="{name}"', "X-Worksheet-As-Of": meta["as_of"]})

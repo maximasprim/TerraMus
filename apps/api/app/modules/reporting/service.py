@@ -16,6 +16,8 @@ from app.modules.health.service import list_due_follow_ups, get_total_health_cos
 from app.modules.finance.service import get_summary as finance_summary
 from app.modules.commerce.models import Order, OrderItem
 from app.modules.reporting import schemas
+from app.modules.cycles import resolve as cyc_resolve
+from app.modules.cycles.deps import CycleSel
 
 
 async def _inventory_value(db: AsyncSession, org_id: uuid.UUID) -> Decimal:
@@ -41,22 +43,57 @@ async def _inventory_value(db: AsyncSession, org_id: uuid.UUID) -> Decimal:
     return total
 
 
-async def dashboard_summary(db: AsyncSession, org_id: uuid.UUID) -> schemas.DashboardSummary:
-    herd = await get_herd_summary(db, org_id)
+async def _feedlot_value_estimate(db: AsyncSession, org_id: uuid.UUID, cycle: CycleSel | None) -> tuple[Decimal, int, Decimal | None]:
+    """Worksheet-imported feedlot animals carry no 'current value', so the herd value card read 0. For ACTIVE feedlot
+    animals with no stated value, estimate: current weight x the last sale price per kg, else the purchase cost.
+    Animals that do have a current value are untouched, and non-feedlot animals are never estimated.
+    -> (estimate, animals estimated, price per kg used)"""
+    from app.modules.feedlot.models import FeedlotAnimal, SaleBatch
+    q = (select(Animal.current_weight, Animal.acquisition_cost)
+         .join(FeedlotAnimal, FeedlotAnimal.animal_id == Animal.id)
+         .where(Animal.organization_id == org_id, Animal.status.notin_(INACTIVE_STATUSES), Animal.current_value.is_(None)))
+    if cycle is not None:
+        q = q.where(Animal.id.in_(cyc_resolve.animal_ids_in(org_id, cycle)))
+    rows = (await db.execute(q)).all()
+    if not rows:
+        return Decimal("0"), 0, None
+    price = (await db.execute(
+        select(SaleBatch.price_per_kg)
+        .where(SaleBatch.organization_id == org_id, SaleBatch.price_per_kg.is_not(None))
+        .order_by(SaleBatch.sold_on.desc()).limit(1))).scalar_one_or_none()
+    total = Decimal("0")
+    for weight, cost in rows:
+        total += Decimal(weight) * Decimal(price) if (price and weight) else Decimal(cost or 0)
+    return total, len(rows), (Decimal(price) if price else None)
+
+
+async def dashboard_summary(db: AsyncSession, org_id: uuid.UUID, cycle: CycleSel | None = None) -> schemas.DashboardSummary:
+    """With a cycle: herd, crops and the month's finance are that cycle's. Milk, stock levels and follow-ups
+    are about today's operation, not a production run, so they stay organisation-wide."""
+    herd = await get_herd_summary(db, org_id, cycle)
     milk = await dairy_herd_summary(db, org_id, date.today())
-    crops = await get_crop_summary(db, org_id)
+    crops = await get_crop_summary(db, org_id, cycle)
     low_stock_crop_listings = await list_low_stock_crop_listings(db, org_id)
     inventory_value = await _inventory_value(db, org_id)
     low_stock = await low_stock_items(db, org_id)
     due_follow_ups = await list_due_follow_ups(db, org_id, within_days=14)
 
-    month_start = date.today().replace(day=1)
-    finance = await finance_summary(db, org_id, month_start, date.today())
+    # One cycle selected -> its money from the start of the cycle to today (a cycle's sales rarely fall in the current
+    # month, so "this month" showed 0); all cycles -> the current month, as before.
+    period_start = date(2000, 1, 1) if cycle is not None else date.today().replace(day=1)
+    finance = await finance_summary(db, org_id, period_start, date.today(), cycle)
+    estimate, estimated_n, price = await _feedlot_value_estimate(db, org_id, cycle)
+    basis = None
+    if estimated_n:
+        basis = (f"Includes an estimate for {estimated_n} feedlot animals with no stated value: current weight x the last "
+                 f"sale price per kg (KES {price:,.0f}); purchase cost where no price or weight is known."
+                 if price else
+                 f"Includes an estimate for {estimated_n} feedlot animals with no stated value, at purchase cost.")
 
     return schemas.DashboardSummary(
         total_animals=herd["total_animals"],
         active_animals=herd["active_animals"],
-        herd_value=Decimal(herd["herd_value"]),
+        herd_value=Decimal(herd["herd_value"]) + estimate,
         animals_for_sale=herd["for_sale"],
         animals_reserved=herd["reserved"],
         animals_sold=herd["sold"],
@@ -71,6 +108,9 @@ async def dashboard_summary(db: AsyncSession, org_id: uuid.UUID) -> schemas.Dash
         active_crop_plantings=crops["active_plantings"],
         crop_planting_value=Decimal(crops["total_planting_value"]),
         low_stock_crop_listing_count=len(low_stock_crop_listings),
+        finance_period="cycle" if cycle is not None else "month",
+        herd_value_estimated=estimated_n > 0,
+        herd_value_basis=basis,
     )
 
 
@@ -215,7 +255,7 @@ def _totals(details: list[schemas.AnimalProfitabilityDetail]) -> schemas.Profita
     return t
 
 
-async def profitability_report(db: AsyncSession, org_id: uuid.UUID) -> schemas.ProfitabilityReport:
+async def profitability_report(db: AsyncSession, org_id: uuid.UUID, cycle: CycleSel | None = None) -> schemas.ProfitabilityReport:
     """Spec §25 - most/least profitable animals, average profit. Enriches the
     Phase 2 acquisition-only figure with real feed (Ph3) and health (Ph2b)
     costs now that those modules exist, without livestock/service.py needing
@@ -223,7 +263,10 @@ async def profitability_report(db: AsyncSession, org_id: uuid.UUID) -> schemas.P
 
     Sales made outside the web shop (recorded in the feedlot module, manually or via
     the worksheet import) are folded in per animal; culled/died animals show as losses."""
-    animals_result = await db.execute(select(Animal).where(Animal.organization_id == org_id))
+    aq = select(Animal).where(Animal.organization_id == org_id)
+    if cycle is not None:
+        aq = aq.where(Animal.id.in_(cyc_resolve.animal_ids_in(org_id, cycle)))
+    animals_result = await db.execute(aq)
     feedlot_rows = await _feedlot_rows(db, org_id)
     details = [
         await _animal_profitability_detail(db, org_id, animal, feedlot_rows.get(str(animal.id)))
@@ -323,7 +366,7 @@ async def animal_profitability_breakdown(
     )
 
 
-async def render_livestock_report_pdf(db: AsyncSession, org_id: uuid.UUID) -> bytes:
+async def render_livestock_report_pdf(db: AsyncSession, org_id: uuid.UUID, cycle: CycleSel | None = None) -> bytes:
     """Spec §44 PDF export - same underlying data as export_livestock_csv,
     rendered as a table via reportlab instead of written as CSV rows. Kept
     in this module (not a separate pdf.py like finance's) since, unlike an
@@ -336,7 +379,10 @@ async def render_livestock_report_pdf(db: AsyncSession, org_id: uuid.UUID) -> by
     from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
     import io
 
-    result = await db.execute(select(Animal).where(Animal.organization_id == org_id))
+    aq = select(Animal).where(Animal.organization_id == org_id)
+    if cycle is not None:
+        aq = aq.where(Animal.id.in_(cyc_resolve.animal_ids_in(org_id, cycle)))
+    result = await db.execute(aq)
     animals = list(result.scalars().all())
 
     buffer = io.BytesIO()

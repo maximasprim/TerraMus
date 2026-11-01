@@ -98,7 +98,7 @@ class Settings(BaseSettings):
 
     # Custom domains for tenant public storefronts (apps/web's /shop/{slug}
     # pages, reachable at a tenant's own domain instead of yours). Empty by
-    # default — the whole feature is inert with no token set, same "opt-in,
+    # default - the whole feature is inert with no token set, same "opt-in,
     # nothing breaks if unconfigured" pattern as OTEL/SMTP/Daraja above.
     # VERCEL_TEAM_ID is only needed if the project lives under a Vercel team
     # rather than a personal account.

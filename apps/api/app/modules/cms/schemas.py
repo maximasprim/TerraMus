@@ -127,3 +127,14 @@ class BannerOut(BaseModel):
     is_active: bool
     starts_at: date | None
     ends_at: date | None
+
+
+class SiteImageOut(BaseModel):
+    """Result of uploading a logo/banner image. `url` is set only when the image lives in the storage bucket;
+    otherwise the image is served by GET /api/v1/media/site-images/{id}."""
+    id: uuid.UUID
+    kind: str
+    width: int
+    height: int
+    size_bytes: int
+    url: str | None = None

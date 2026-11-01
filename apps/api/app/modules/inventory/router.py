@@ -7,6 +7,7 @@ from app.core.database import get_db
 from app.modules.identity.deps import require_permission
 from app.modules.identity.models import User
 from app.modules.inventory import schemas, service
+from app.modules.cycles.deps import CycleSel, ensure_writable, cycle_filter
 
 router = APIRouter(prefix="/api/v1/inventory", tags=["inventory"])
 
@@ -39,8 +40,9 @@ async def list_movements(
     item_id: uuid.UUID,
     user: User = Depends(require_permission("inventory.read")),
     db: AsyncSession = Depends(get_db),
+    cycle: CycleSel | None = Depends(cycle_filter),
 ):
-    return await service.list_movements(db, user.organization_id, item_id)
+    return await service.list_movements(db, user.organization_id, item_id, cycle)
 
 
 @router.post("/items/{item_id}/movements", response_model=schemas.StockMovementOut, status_code=201)
@@ -50,6 +52,7 @@ async def record_movement(
     user: User = Depends(require_permission("inventory.adjust")),
     db: AsyncSession = Depends(get_db),
 ):
+    await ensure_writable(db, user.organization_id, req.production_cycle_id)
     return await service.record_movement(db, user.organization_id, item_id, user.id, req)
 
 

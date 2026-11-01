@@ -3,12 +3,12 @@ import { NextRequest, NextResponse } from "next/server";
 /**
  * Runs on every request. Most requests are for THIS app's own domain
  * (localhost in dev, your real domain in prod) and pass through
- * unchanged. Only when the Host header is something else — a tenant's
- * custom domain — does this do anything: ask the backend which org that
+ * unchanged. Only when the Host header is something else - a tenant's
+ * custom domain - does this do anything: ask the backend which org that
  * domain belongs to (only ever a VERIFIED domain, see
  * identity/service.py's get_organization_by_verified_domain), then
  * rewrite the request to that org's /shop/{slug}/... route. The visitor's
- * address bar still shows their own domain — Next.js resolves the
+ * address bar still shows their own domain - Next.js resolves the
  * request against your existing /shop/[orgSlug] pages internally.
  *
  * Known limitation, stated plainly: this calls the backend on every
@@ -17,7 +17,7 @@ import { NextRequest, NextResponse } from "next/server";
  * meaningful traffic on custom domains would want to cache the
  * domain → slug lookup (Vercel Edge Config or KV are the natural fit,
  * both queryable from middleware) rather than hitting the API each time.
- * Not built here — flagging it rather than pretending this is
+ * Not built here - flagging it rather than pretending this is
  * production-scale as written.
  */
 
@@ -68,13 +68,13 @@ export async function middleware(request: NextRequest) {
       slug = data?.slug ?? null;
     }
   } catch {
-    // Backend unreachable — fall through to a normal 404 rather than
+    // Backend unreachable - fall through to a normal 404 rather than
     // throwing, so a transient API issue doesn't take down every custom
     // domain's storefront with a hard error.
   }
 
   if (!slug) {
-    // Unknown or unverified domain — let it 404 naturally rather than
+    // Unknown or unverified domain - let it 404 naturally rather than
     // silently serving something. No rewrite happens.
     return NextResponse.next();
   }
@@ -86,6 +86,6 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   // Skip the middleware entirely for static assets and image optimization
-  // requests — no reason to pay the resolve-domain round trip for those.
+  // requests - no reason to pay the resolve-domain round trip for those.
   matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };

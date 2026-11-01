@@ -32,6 +32,7 @@ class CropPlantingCreate(BaseModel):
     source: str | None = None
     supplier: str | None = None
     notes: str | None = None
+    production_cycle_id: uuid.UUID | None = None
 
 
 class CropPlantingUpdate(BaseModel):
@@ -43,6 +44,7 @@ class CropPlantingUpdate(BaseModel):
     expected_harvest_date: date | None = None
     health_status: str | None = None
     notes: str | None = None
+    production_cycle_id: uuid.UUID | None = None
 
 
 class StatusChangeRequest(BaseModel):
@@ -74,6 +76,7 @@ class CropPlantingOut(BaseModel):
     source: str | None
     supplier: str | None
     notes: str | None
+    production_cycle_id: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -122,3 +125,11 @@ class CropPlantingProfitability(BaseModel):
     total_investment: Decimal
     total_harvested_value: Decimal | None = None
     current_value: Decimal | None
+    # Added with crop sales and costs. All defaulted, so existing consumers are unaffected.
+    revenue_web: Decimal = Decimal("0")
+    revenue_direct: Decimal = Decimal("0")
+    total_revenue: Decimal = Decimal("0")
+    profit: Decimal | None = None                 # revenue - total_investment, realised so far
+    quantity_harvested: Decimal = Decimal("0")
+    stock_on_hand: Decimal = Decimal("0")
+

@@ -44,6 +44,7 @@ class StockMovementCreate(BaseModel):
     reference: str | None = None
     notes: str | None = None
     moved_at: datetime | None = None
+    production_cycle_id: uuid.UUID | None = None
 
 
 class StockMovementOut(BaseModel):
@@ -60,6 +61,7 @@ class StockMovementOut(BaseModel):
     notes: str | None
     performed_by: uuid.UUID | None
     moved_at: datetime
+    production_cycle_id: uuid.UUID | None = None
 
 
 class LowStockItem(BaseModel):

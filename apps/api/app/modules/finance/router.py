@@ -8,6 +8,7 @@ from app.core.database import get_db
 from app.modules.identity.deps import require_permission
 from app.modules.identity.models import User
 from app.modules.finance import schemas, service
+from app.modules.cycles.deps import CycleSel, cycle_filter, ensure_writable
 
 router = APIRouter(prefix="/api/v1/finance", tags=["finance"])
 
@@ -22,9 +23,10 @@ async def list_transactions(
     activity: str | None = Query(None),
     user: User = Depends(require_permission("finance.read")),
     db: AsyncSession = Depends(get_db),
+    cycle: CycleSel | None = Depends(cycle_filter),
 ):
     return await service.list_transactions(db, user.organization_id, start_date, end_date, transaction_type, category,
-                                           farm_id, activity)
+                                           farm_id, activity, cycle)
 
 
 @router.post("/transactions", response_model=schemas.FinanceTransactionOut, status_code=201)
@@ -33,7 +35,10 @@ async def record_transaction(
     user: User = Depends(require_permission("finance.create")),
     db: AsyncSession = Depends(get_db),
 ):
-    return await service.record_transaction(db, user.organization_id, user.id, req, reference_type="manual")
+    await ensure_writable(db, user.organization_id, req.production_cycle_id)
+    txn = await service.record_transaction(db, user.organization_id, user.id, req, reference_type="manual")
+    txn.effective_cycle_id = txn.production_cycle_id
+    return txn
 
 
 @router.get("/summary", response_model=schemas.FinanceSummary)
@@ -42,8 +47,9 @@ async def summary(
     end_date: date = Query(...),
     user: User = Depends(require_permission("finance.read")),
     db: AsyncSession = Depends(get_db),
+    cycle: CycleSel | None = Depends(cycle_filter),
 ):
-    return await service.get_summary(db, user.organization_id, start_date, end_date)
+    return await service.get_summary(db, user.organization_id, start_date, end_date, cycle)
 
 
 @router.get("/orders/{order_id}/invoice", response_model=schemas.InvoiceOut)
@@ -78,6 +84,7 @@ async def profitability(
     activity: str | None = Query(None, pattern=schemas.ACTIVITY_PATTERN, description="Limit to one activity"),
     user: User = Depends(require_permission("finance.read")),
     db: AsyncSession = Depends(get_db),
+    cycle: CycleSel | None = Depends(cycle_filter),
 ):
     """Income, expense and net by activity, sub-farm, category and month."""
-    return await service.get_profitability(db, user.organization_id, start_date, end_date, farm_id, activity)
+    return await service.get_profitability(db, user.organization_id, start_date, end_date, farm_id, activity, cycle)

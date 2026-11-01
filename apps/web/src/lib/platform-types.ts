@@ -20,6 +20,18 @@ export interface OrganizationSummaryOut {
   subscription_tier: string | null;
   subscription_status: string | null;
   created_at: string;
+  subscription_tier_slug?: string | null;
+  subscription_period_end?: string | null;
+}
+
+export interface PlatformPlan {
+  id: string;
+  name: string;
+  slug: string;
+  monthly_price_kes: number;
+  max_users: number | null;
+  max_animals: number | null;
+  max_crop_plantings?: number | null;
 }
 
 export interface PlatformDashboardStats {
@@ -70,6 +82,16 @@ export interface TenantCatalogSettings {
   crops_enabled: boolean;
   enabled_species: string[] | null;
   enabled_crop_types: string[] | null;
+  /** Sidebar paths hidden for this organization (null/[] = none hidden). */
+  hidden_menus?: string[] | null;
+}
+
+/** One tenant sidebar entry a platform admin can hide. `hideable: false` entries are always shown. */
+export interface PlatformMenuEntry {
+  key: string;
+  label: string;
+  group: string;
+  hideable: boolean;
 }
 
 /** PATCH body - omitted fields are left unchanged by the API. */
@@ -80,4 +102,6 @@ export interface TenantCatalogSettingsUpdate {
   enabled_crop_types?: string[];
   clear_species_restriction?: boolean;
   clear_crop_type_restriction?: boolean;
+  /** Menus to hide; [] shows everything again. Omit to leave unchanged. */
+  hidden_menus?: string[];
 }

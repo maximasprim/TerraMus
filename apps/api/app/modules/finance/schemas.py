@@ -22,6 +22,7 @@ class FinanceTransactionCreate(BaseModel):
     description: str | None = None
     farm_id: uuid.UUID | None = None
     activity: str | None = Field(default=None, pattern=ACTIVITY_PATTERN)
+    production_cycle_id: uuid.UUID | None = None
 
 
 class FinanceTransactionOut(BaseModel):
@@ -37,6 +38,8 @@ class FinanceTransactionOut(BaseModel):
     transaction_date: date
     farm_id: uuid.UUID | None = None
     activity: str | None = None
+    production_cycle_id: uuid.UUID | None = None      # the explicit tag (rows traced to a cycle through their animal carry none)
+    effective_cycle_id: uuid.UUID | None = None       # tag, else the cycle derived through the reference
     created_by: uuid.UUID | None
     created_at: datetime
 

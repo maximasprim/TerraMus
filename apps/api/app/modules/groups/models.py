@@ -19,6 +19,7 @@ class AnimalGroup(Base, UUIDPKMixin, TimestampMixin):
                       CheckConstraint("status in ('active','closed')", name="valid_status"),
                       CheckConstraint("initial_count > 0 and current_count >= 0", name="valid_counts"))
     organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    production_cycle_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("production_cycles.id"), nullable=True, index=True)
     farm_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("farms.id"), nullable=True)
     code: Mapped[str] = mapped_column(String(40))
     name: Mapped[str] = mapped_column(String(160))

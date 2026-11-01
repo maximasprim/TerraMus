@@ -4,6 +4,7 @@ export interface FarmOption { id: string; name: string }
 export interface IntakeBatch {
   id: string; batch_number: number; name: string; delivered_on: string; farm_id: string | null; source: string | null; sex_class: string;
   head_purchased: number; landed_cost: number; landed_cost_per_head: number; head_registered: number; head_active: number;
+  production_cycle_id?: string | null;
 }
 export interface SaleBatch {
   id: string; batch_number: number; sold_on: string; price_per_kg: string | null; buyer_name: string | null;

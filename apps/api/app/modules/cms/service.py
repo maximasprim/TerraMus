@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.cms.models import FarmProfile, Testimonial, BlogPost, FAQ, Banner
-from app.modules.cms import schemas
+from app.modules.cms import schemas, site_images
 
 
 def _slugify(title: str) -> str:
@@ -30,10 +30,14 @@ async def get_or_create_profile(db: AsyncSession, org_id: uuid.UUID, default_nam
 
 async def update_profile(db: AsyncSession, org_id: uuid.UUID, req: schemas.FarmProfileUpdate) -> FarmProfile:
     profile = await get_or_create_profile(db, org_id)
+    old_logo = profile.logo_url
     for field, value in req.model_dump(exclude_unset=True).items():
         setattr(profile, field, value)
     await db.commit()
     await db.refresh(profile)
+    if old_logo and old_logo != profile.logo_url:
+        await site_images.release_if_unused(db, org_id, old_logo)  # a replaced upload doesn't linger
+        await db.refresh(profile)
     return profile
 
 
@@ -162,3 +166,14 @@ async def list_banners(db: AsyncSession, org_id: uuid.UUID, active_only: bool = 
         )
     result = await db.execute(query.order_by(Banner.sort_order))
     return list(result.scalars().all())
+
+
+async def delete_banner(db: AsyncSession, org_id: uuid.UUID, banner_id: uuid.UUID) -> None:
+    result = await db.execute(select(Banner).where(Banner.id == banner_id, Banner.organization_id == org_id))
+    banner = result.scalar_one_or_none()
+    if not banner:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Banner not found")
+    image_url = banner.image_url
+    await db.delete(banner)
+    await db.commit()
+    await site_images.release_if_unused(db, org_id, image_url)  # drop the uploaded file too, if it was one

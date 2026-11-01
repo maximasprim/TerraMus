@@ -11,7 +11,7 @@ export interface FinanceAnalytics {
   total_income: string; total_expense: string; net: string;
   income_by_category: LabelAmount[]; expense_by_category: LabelAmount[];
 }
-export interface MonthlySales { month: string; orders: number; revenue: string; feedlot_head?: number; feedlot_revenue?: string; feedlot_purchase_head?: number; feedlot_purchases?: string }
+export interface MonthlySales { month: string; orders: number; revenue: string; feedlot_head?: number; feedlot_revenue?: string; feedlot_purchase_head?: number; feedlot_purchases?: string; crop_sales?: number; crop_sales_revenue?: string }
 export interface ProviderTotal { key: string; amount: string; count: number }
 export interface SalesAnalytics {
   monthly: MonthlySales[]; orders_by_status: LabelCount[]; payments_by_provider: ProviderTotal[];
@@ -20,6 +20,8 @@ export interface SalesAnalytics {
   feedlot_head?: number; feedlot_revenue?: string; combined_revenue?: string;
   // bulls bought into the feedlot (by delivery date): the money out against feedlot_revenue
   feedlot_purchase_head?: number; feedlot_purchases?: string;
+  // produce sold off the web shop (web crop orders are already inside total_revenue)
+  crop_sales?: number; crop_sales_revenue?: string;
 }
 export interface HerdAnalytics { total: number; active: number; by_species: LabelCount[]; by_status: LabelCount[] }
 export interface DailyMilk { date: string; liters: string }

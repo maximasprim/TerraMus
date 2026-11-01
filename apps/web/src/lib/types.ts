@@ -49,6 +49,9 @@ export interface DashboardSummary {
   active_crop_plantings: number;
   crop_planting_value: string;
   low_stock_crop_listing_count: number;
+  finance_period?: "month" | "cycle";
+  herd_value_estimated?: boolean;
+  herd_value_basis?: string | null;
 }
 
 export interface Animal {
@@ -158,6 +161,13 @@ export interface CropPlantingProfitability {
   total_investment: string;
   total_harvested_value: string | null;
   current_value: string | null;
+  // Added with crop sales and costs (optional so older responses still type-check)
+  revenue_web?: string;
+  revenue_direct?: string;
+  total_revenue?: string;
+  profit?: string | null;
+  quantity_harvested?: string;
+  stock_on_hand?: string;
 }
 
 export interface CatalogEntry {
@@ -180,6 +190,8 @@ export interface EffectiveCatalog {
   crops_enabled: boolean;
   species: SpeciesCatalogEntry[];
   crop_types: CropTypeCatalogEntry[];
+  /** Sidebar paths a platform admin has hidden for this organization (absent/empty = none). */
+  hidden_menus?: string[];
 }
 
 export interface Farm {
@@ -355,6 +367,8 @@ export interface FinanceTransaction {
   description: string | null;
   transaction_date: string;
   created_at: string;
+  production_cycle_id?: string | null;
+  effective_cycle_id?: string | null;
 }
 
 export interface FinanceSummary {
@@ -848,6 +862,16 @@ export interface FAQ {
   is_published: boolean;
 }
 
+/** Result of POST /api/v1/cms/images (a logo/banner uploaded from the device). */
+export interface SiteImageUpload {
+  id: string;
+  kind: "logo" | "banner";
+  width: number;
+  height: number;
+  size_bytes: number;
+  url: string | null;
+}
+
 export interface Banner {
   id: string;
   title: string;
@@ -957,3 +981,31 @@ export interface AuditLogEntry {
   new_value: Record<string, unknown> | null;
   created_at: string;
 }
+
+// ---- Crop sales (made outside the web shop), costs and per-planting economics ----
+export interface CropSaleRow {
+  id: string; planting_id: string; sale_date: string; quantity: string; unit: string; unit_price: string; amount: string;
+  customer_id: string | null; buyer_name: string | null; notes: string | null; source: string;
+  voided_at: string | null; void_reason: string | null; created_at: string; in_finance: boolean;
+}
+export interface CropCostRow {
+  id: string; planting_id: string; cost_date: string; category: string; amount: string; description: string | null;
+  source: string; voided_at: string | null; void_reason: string | null; created_at: string; in_finance: boolean;
+}
+export interface PlantingEconomics {
+  planting_id: string; planting_number: string; crop_type: string; variety: string | null; status: string; is_closed: boolean;
+  unit: string | null; acquisition_cost: string; input_cost: string; labour_cost: string; other_cost: string; total_investment: string;
+  revenue_web: string; revenue_direct: string; total_revenue: string; profit: string;
+  quantity_harvested: string; quantity_sold_web: string; quantity_sold_direct: string; stock_on_hand: string;
+  listed_price: string | null; stock_value: string | null; avg_price_per_unit: string | null; cost_per_unit: string | null;
+}
+export interface CropEconomicsTotals {
+  plantings: number; total_investment: string; revenue_web: string; revenue_direct: string; total_revenue: string;
+  profit: string; closed_plantings: number; closed_profit: string;
+}
+export interface CropEconomicsReport { plantings: PlantingEconomics[]; totals: CropEconomicsTotals }
+export interface PlantingBreakdown {
+  summary: PlantingEconomics; costs: CropCostRow[]; direct_sales: CropSaleRow[];
+  web_sales: { order_id: string; date: string; quantity: string; unit_price: string; amount: string; status: string }[];
+}
+export interface CropSaleResult { sale: CropSaleRow; ledger: string; stock_warning: string | null }

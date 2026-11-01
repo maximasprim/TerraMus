@@ -10,6 +10,7 @@ from app.modules.identity.models import User
 from app.modules.farm.models import Farm, Location
 from app.modules.crops import schemas, service
 from app.modules.crops.models import CropPlanting, INACTIVE_PLANTING_STATUSES
+from app.modules.cycles.deps import CycleSel, apply_col, cycle_filter, ensure_writable
 
 router = APIRouter(prefix="/api/v1/crops", tags=["crops"])
 
@@ -42,8 +43,10 @@ async def list_plantings(
     active_only: bool = Query(False, description="Exclude harvested/failed/archived plantings"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
+    cycle: CycleSel | None = Depends(cycle_filter),
 ):
-    query = select(CropPlanting).where(CropPlanting.organization_id == user.organization_id)
+    query = apply_col(select(CropPlanting).where(CropPlanting.organization_id == user.organization_id),
+                      CropPlanting.production_cycle_id, cycle)
     if crop_type:
         query = query.where(CropPlanting.crop_type == crop_type)
     if status_filter:
@@ -64,6 +67,7 @@ async def create_planting(
     db: AsyncSession = Depends(get_db),
 ):
     await _assert_farm_and_location_belong_to_org(db, user.organization_id, req.farm_id, req.location_id)
+    await ensure_writable(db, user.organization_id, req.production_cycle_id)
     return await service.create_planting(db, user.organization_id, user.id, req)
 
 
@@ -143,13 +147,23 @@ async def get_profitability(
     db: AsyncSession = Depends(get_db),
 ):
     planting = await service.get_planting(db, planting_id, user.organization_id)
-    return service.compute_profitability(planting)
+    base = service.compute_profitability(planting)
+    from app.modules.crops import economics
+    econ = await economics.planting_economics(db, user.organization_id, planting_id)
+    return base.model_copy(update={
+        "input_cost": econ.input_cost, "labor_cost": econ.labour_cost, "other_cost": econ.other_cost,
+        "total_investment": econ.total_investment,
+        "total_harvested_value": econ.total_revenue if econ.total_revenue > 0 else None,
+        "revenue_web": econ.revenue_web, "revenue_direct": econ.revenue_direct, "total_revenue": econ.total_revenue,
+        "profit": econ.profit, "quantity_harvested": econ.quantity_harvested, "stock_on_hand": econ.stock_on_hand,
+    })
 
 
 @router.get("/stats/summary")
 async def crop_summary(
     user: User = Depends(require_permission("reports.view")),
     db: AsyncSession = Depends(get_db),
+    cycle: CycleSel | None = Depends(cycle_filter),
 ):
     """Backs dashboard-style 'Total Crops' cards, mirroring livestock's /stats/summary."""
-    return await service.get_crop_summary(db, user.organization_id)
+    return await service.get_crop_summary(db, user.organization_id, cycle)

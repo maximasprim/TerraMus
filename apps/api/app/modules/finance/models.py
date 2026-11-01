@@ -27,6 +27,7 @@ class FinanceTransaction(Base, UUIDPKMixin):
     __tablename__ = "finance_transactions"
 
     organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    production_cycle_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("production_cycles.id"), nullable=True, index=True)
     transaction_type: Mapped[str] = mapped_column(String(16), index=True)  # income | expense
     category: Mapped[str] = mapped_column(String(32), index=True)
     amount: Mapped[float] = mapped_column(Numeric(12, 2))

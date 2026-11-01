@@ -271,9 +271,16 @@ async def check_animal_limit(db: AsyncSession, org_id: uuid.UUID) -> None:
     below for the max_users equivalent."""
     from app.modules.livestock.models import Animal, INACTIVE_STATUSES
 
-    subscription = await get_or_create_subscription(db, org_id)
-    tier_result = await db.execute(select(SubscriptionTier).where(SubscriptionTier.id == subscription.tier_id))
-    tier = tier_result.scalar_one()
+    # The plan cannot change in the middle of one request, so look it up once per database session (a bulk import
+    # checks the limit for every animal and used to re-read the subscription and tier each time). The animal count
+    # below is still read fresh on every call.
+    memo = db.sync_session.info.setdefault("plan_tier_by_org", {})
+    tier = memo.get(org_id)
+    if tier is None:
+        subscription = await get_or_create_subscription(db, org_id)
+        tier_result = await db.execute(select(SubscriptionTier).where(SubscriptionTier.id == subscription.tier_id))
+        tier = tier_result.scalar_one()
+        memo[org_id] = tier
     if tier.max_animals is None:
         return  # unlimited on this tier
 

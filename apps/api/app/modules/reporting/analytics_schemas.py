@@ -43,6 +43,9 @@ class MonthlySales(BaseModel):
     # Bulls bought into the feedlot that month (by delivery date): the money going out against the sales above.
     feedlot_purchase_head: int = 0
     feedlot_purchases: Decimal = Decimal("0")
+    # Crop produce sold off the web shop that month (web crop orders are already inside `revenue`).
+    crop_sales: int = 0
+    crop_sales_revenue: Decimal = Decimal("0")
 
 
 class ProviderTotal(BaseModel):
@@ -63,6 +66,8 @@ class SalesAnalytics(BaseModel):
     combined_revenue: Decimal = Decimal("0")   # web orders + feedlot sales
     feedlot_purchase_head: int = 0
     feedlot_purchases: Decimal = Decimal("0")  # landed cost of bulls delivered in the window
+    crop_sales: int = 0
+    crop_sales_revenue: Decimal = Decimal("0")  # produce sold off the web shop; included in combined_revenue
 
 
 class HerdAnalytics(BaseModel):

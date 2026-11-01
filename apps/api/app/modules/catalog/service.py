@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.catalog.models import TenantCatalogSettings
 from app.modules.catalog import schemas
+from app.modules.catalog.menus import HIDEABLE_KEYS
 from app.modules.livestock.catalog import LIVESTOCK_SPECIES, SPECIES_CODES
 from app.modules.crops.catalog import CROP_TYPES, CROP_TYPE_CODES
 
@@ -36,6 +37,8 @@ async def update_settings(
         settings.livestock_enabled = req.livestock_enabled
     if req.crops_enabled is not None:
         settings.crops_enabled = req.crops_enabled
+    if req.hidden_menus is not None:
+        settings.hidden_menus = req.hidden_menus
     if req.clear_species_restriction:
         settings.enabled_species = None
     elif req.enabled_species is not None:
@@ -88,6 +91,8 @@ async def get_effective_catalog(db: AsyncSession, org_id: uuid.UUID) -> schemas.
         crops_enabled=settings.crops_enabled,
         species=species if settings.livestock_enabled else [],
         crop_types=crop_types if settings.crops_enabled else [],
+        # defensive: only ever report keys that are still hideable, so a menu removed or protected later can't linger
+        hidden_menus=[m for m in (settings.hidden_menus or []) if m in HIDEABLE_KEYS],
     )
 
 

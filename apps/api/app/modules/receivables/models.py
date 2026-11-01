@@ -20,6 +20,7 @@ class AccountEntry(Base, UUIDPKMixin):
                       CheckConstraint("amount > 0", name="positive_amount"))
 
     organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    production_cycle_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("production_cycles.id"), nullable=True, index=True)
     customer_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("customers.id"), index=True)
     entry_type: Mapped[str] = mapped_column(String(12))
     amount: Mapped[float] = mapped_column(Numeric(12, 2))

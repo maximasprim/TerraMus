@@ -7,6 +7,7 @@ from app.core.database import get_db
 from app.modules.identity.deps import require_permission
 from app.modules.identity.models import User
 from app.modules.procurement import schemas, service
+from app.modules.cycles.deps import CycleSel, cycle_filter
 
 router = APIRouter(prefix="/api/v1/procurement", tags=["procurement"])
 
@@ -59,8 +60,9 @@ async def list_purchase_orders(
     supplier_id: uuid.UUID | None = Query(None),
     user: User = Depends(require_permission("procurement.manage")),
     db: AsyncSession = Depends(get_db),
+    cycle: CycleSel | None = Depends(cycle_filter),
 ):
-    return await service.list_purchase_orders(db, user.organization_id, status, supplier_id)
+    return await service.list_purchase_orders(db, user.organization_id, status, supplier_id, cycle)
 
 
 @router.post("/purchase-orders", response_model=schemas.PurchaseOrderOut, status_code=201)

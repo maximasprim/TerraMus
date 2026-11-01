@@ -56,7 +56,7 @@ export function ShopHeader({ orgSlug }: { orgSlug: string }) {
             )}
             <span className="min-w-0">
               <span className="block truncate font-display text-xl italic leading-tight">{data?.farm_name ?? "Farm"}</span>
-              {data?.tagline && <span className="hidden truncate text-xs text-paper/70 md:block">{data.tagline}</span>}
+              {data?.tagline && <span className="hidden truncate text-xs text-brass/80 md:block">{data.tagline}</span>}
             </span>
           </Link>
 

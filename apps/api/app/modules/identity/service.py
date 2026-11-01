@@ -1,5 +1,7 @@
 import logging
+import os
 import re
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -53,7 +55,7 @@ async def update_organization_settings(
 def _dns_instructions_for(domain: str, token: str) -> "schemas.DnsInstructions":
     from app.modules.identity import schemas as _schemas
     # Root/apex domains need an A record (Vercel's stable anycast IP);
-    # subdomains use a CNAME instead — both are shown so the tenant can use
+    # subdomains use a CNAME instead - both are shown so the tenant can use
     # whichever fits what they're pointing (most will use the CNAME, since
     # most tenants will use a subdomain like shop.theirfarm.com rather than
     # their bare root domain).
@@ -129,7 +131,7 @@ async def get_organization_domain_status(db: AsyncSession, org_id: uuid.UUID) ->
 
 
 async def verify_organization_domain(db: AsyncSession, org_id: uuid.UUID) -> "schemas.DomainStatusOut":
-    """Checks the TXT record independently — this is OUR ownership proof,
+    """Checks the TXT record independently - this is OUR ownership proof,
     separate from whatever Vercel itself thinks about the domain (see
     vercel_client.py's docstring). Runs the (synchronous) dnspython lookup
     in a thread so it doesn't block the event loop."""
@@ -220,7 +222,7 @@ async def remove_organization_domain(db: AsyncSession, org_id: uuid.UUID) -> Non
 async def get_organization_by_verified_domain(db: AsyncSession, domain: str) -> Organization | None:
     """Used by the public domain-resolution endpoint (public/router.py) that
     the frontend's Next.js middleware calls on every request to a non-app
-    hostname. Only ever matches a domain with domain_verified == True —
+    hostname. Only ever matches a domain with domain_verified == True -
     an org that added a domain but hasn't proven DNS control yet must not
     be reachable at that domain."""
     result = await db.execute(
@@ -346,17 +348,46 @@ async def get_users_with_permission(db: AsyncSession, org_id: uuid.UUID, permiss
     return list(result.scalars().all())
 
 
+# Permission codes granted by a set of roles change only when a role is created (they are set once, at creation) or
+# the permission catalogue is re-seeded by a script. So they are cached for a short time, keyed by the role ids
+# themselves: a user whose roles change gets a different key and sees the new permissions immediately. Off unless
+# PERMISSION_CACHE_TTL_SECONDS is set above 0 (e.g. 30), so nothing changes until you opt in.
+_PERMISSION_CACHE: dict[frozenset, tuple[float, frozenset]] = {}
+
+
+def _permission_cache_ttl() -> float:
+    try:
+        return float(os.getenv("PERMISSION_CACHE_TTL_SECONDS", "0") or 0)
+    except ValueError:
+        return 0.0
+
+
+def invalidate_permission_cache() -> None:
+    _PERMISSION_CACHE.clear()
+
+
 async def get_user_permissions(db: AsyncSession, user: User) -> set[str]:
     if not user.roles:
         return set()
     role_ids = [role.id for role in user.roles]
+    ttl = _permission_cache_ttl()
+    key = frozenset(role_ids)
+    if ttl > 0:
+        hit = _PERMISSION_CACHE.get(key)
+        if hit is not None and time.monotonic() - hit[0] < ttl:
+            return set(hit[1])
     result = await db.execute(
         select(Permission.code)
         .join(role_permissions, role_permissions.c.permission_id == Permission.id)
         .where(role_permissions.c.role_id.in_(role_ids))
         .distinct()
     )
-    return set(result.scalars().all())
+    perms = set(result.scalars().all())
+    if ttl > 0:
+        if len(_PERMISSION_CACHE) > 2000:
+            _PERMISSION_CACHE.clear()
+        _PERMISSION_CACHE[key] = (time.monotonic(), frozenset(perms))
+    return perms
 
 
 async def update_user_roles(

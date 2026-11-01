@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.modules.farm.models import Farm
 from app.modules.feedlot import metrics
 from app.modules.feedlot.models import FeedlotAnimal, FeedlotExit, IntakeBatch, SaleBatch
+from app.modules.feedlot.batch_scope import existing_by_number, unassigned_by_number
 from app.modules.feedlot.service import upsert_costing_doc
 from app.modules.feedlot.worksheet_parse import ParsedWorkbook, parse_workbook, resolve_between
 from app.modules.livestock.models import Animal, AnimalEvent, WeightRecord
@@ -40,7 +41,19 @@ class _Abort(Exception):
 
 async def import_worksheet(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, content: bytes, *,
                            farm_id: uuid.UUID | None = None, dry_run: bool = True,
-                           include_costing: bool = True, post_to_finance: bool = True) -> dict:
+                           include_costing: bool = True, post_to_finance: bool = True,
+                           production_cycle_id: uuid.UUID | None = None) -> dict:
+    from app.modules.cycles.deps import ensure_writable
+    await ensure_writable(db, org_id, production_cycle_id)      # unknown / closed cycle -> a clear 404 / 409 before anything is parsed
+    if production_cycle_id is None:
+        # Batch numbers restart in every cycle, so once an organisation has production cycles an import must say which one
+        # it belongs to (organisations that have never created a cycle import exactly as before).
+        from sqlalchemy import func
+        from app.modules.cycles.models import ProductionCycle
+        if (await db.execute(select(func.count()).select_from(ProductionCycle)
+                             .where(ProductionCycle.organization_id == org_id))).scalar_one():
+            raise HTTPException(422, "Choose the production cycle this worksheet belongs to (or create a new one) before importing. "
+                                     "Batch numbers restart in every cycle, so an import with no cycle could overwrite another cycle's batches.")
     try:
         pw = parse_workbook(content)
     except ValueError as e:
@@ -55,7 +68,7 @@ async def import_worksheet(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UU
                     "warnings": list(pw.warnings), "errors": [], "date_corrections": pw.date_corrections,
                     "reconciliation": {}}
     try:
-        await _apply(db, org_id, user_id, pw, farm_id, include_costing, report, post_to_finance)
+        await _apply(db, org_id, user_id, pw, farm_id, include_costing, report, post_to_finance, production_cycle_id)
         if dry_run:
             await db.rollback()
         else:
@@ -78,7 +91,8 @@ async def import_worksheet(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UU
     return report
 
 
-async def _apply(db, org_id, user_id, pw: ParsedWorkbook, farm_id, include_costing, report, post_to_finance=True) -> None:
+async def _apply(db, org_id, user_id, pw: ParsedWorkbook, farm_id, include_costing, report, post_to_finance=True,
+                 cycle_id: uuid.UUID | None = None) -> None:
     def warn(code, where, msg, **kw):
         report["warnings"].append({"code": code, "where": where, "message": msg, **kw})
 
@@ -100,15 +114,28 @@ async def _apply(db, org_id, user_id, pw: ParsedWorkbook, farm_id, include_costi
 
     # ---------------------------------------------------------- intake batches
     batches: dict[int, IntakeBatch] = {}
-    existing = {b.batch_number: b for b in (await db.execute(select(IntakeBatch).where(IntakeBatch.organization_id == org_id))).scalars()}
+    intake_rows = list((await db.execute(select(IntakeBatch).where(IntakeBatch.organization_id == org_id)
+                                         .order_by(IntakeBatch.created_at))).scalars())
+    # Batch numbers restart in every production cycle: with a cycle selected, a sheet only matches the batch with
+    # that number IN THAT CYCLE. With no cycle selected the original org-wide matching applies.
+    existing = existing_by_number(intake_rows, cycle_id)
+    unassigned_intake = unassigned_by_number(intake_rows) if cycle_id else {}
     for num, sh in sorted(pw.intake.items()):
         cost = pw.batch_costs.get(num, {})
         fields = dict(delivered_on=sh.delivered_on, source=sh.source, sex_class=sh.sex_class, farm_id=farm_id,
                       head_purchased=cost.get("head") or sh.head_hint or len(sh.rows),
                       **{k: D(v) for k, v in cost.items() if k != "head"})
         b = existing.get(num)
+        if b is None and cycle_id:
+            cand = unassigned_intake.get(num)
+            if cand is not None and cand.delivered_on == sh.delivered_on:
+                b = cand            # the very same batch, imported earlier without a cycle: adopt it (below)
+            elif cand is not None:
+                warn("batch_number_reused", sh.sheet,
+                     f"An unassigned batch {num} (delivered {cand.delivered_on}) already exists; it was left untouched and "
+                     f"a separate batch {num} (delivered {sh.delivered_on}) was created in this cycle")
         if b is None:
-            b = IntakeBatch(organization_id=org_id, batch_number=num, name=sh.name, **fields)
+            b = IntakeBatch(organization_id=org_id, batch_number=num, name=sh.name, production_cycle_id=cycle_id, **fields)
             db.add(b)
             report["created"]["intake_batches"] += 1
         else:
@@ -118,6 +145,8 @@ async def _apply(db, org_id, user_id, pw: ParsedWorkbook, farm_id, include_costi
                     continue
                 if v is not None and getattr(b, k) != v:
                     setattr(b, k, v); changed = True
+            if cycle_id and b.production_cycle_id is None:      # adopt existing batches that have no cycle yet; never move one
+                b.production_cycle_id = cycle_id; changed = True
             report["updated" if changed else "unchanged"]["intake_batches"] += 1
         batches[num] = b
     await db.flush()
@@ -129,7 +158,10 @@ async def _apply(db, org_id, user_id, pw: ParsedWorkbook, farm_id, include_costi
 
     # ------------------------------------------------------------ sale batches
     sale_batches: dict[int, SaleBatch] = {}
-    existing_sb = {b.batch_number: b for b in (await db.execute(select(SaleBatch).where(SaleBatch.organization_id == org_id))).scalars()}
+    sale_rows = list((await db.execute(select(SaleBatch).where(SaleBatch.organization_id == org_id)
+                                       .order_by(SaleBatch.created_at))).scalars())
+    existing_sb = existing_by_number(sale_rows, cycle_id)
+    unassigned_sale = unassigned_by_number(sale_rows) if cycle_id else {}
     sales_rows: dict[str, list[dict]] = defaultdict(list)     # tag -> candidate sale rows
     tagless = 0
     for num, ss in sorted(pw.sales.items()):
@@ -153,8 +185,16 @@ async def _apply(db, org_id, user_id, pw: ParsedWorkbook, farm_id, include_costi
             sold_on = Counter(r["sold_on"] for r in resolved_rows).most_common(1)[0][0]
             fields = dict(sold_on=sold_on, price_per_kg=D(pw.sale_prices[num]) if num in pw.sale_prices else None)
             sb = existing_sb.get(num)
+            if sb is None and cycle_id:
+                cand = unassigned_sale.get(num)
+                if cand is not None and cand.sold_on == sold_on:
+                    sb = cand
+                elif cand is not None:
+                    warn("batch_number_reused", ss.sheet,
+                         f"An unassigned sale batch {num} (sold {cand.sold_on}) already exists; it was left untouched and "
+                         f"a separate sale batch {num} was created in this cycle")
             if sb is None:
-                sb = SaleBatch(organization_id=org_id, batch_number=num, **fields)
+                sb = SaleBatch(organization_id=org_id, batch_number=num, production_cycle_id=cycle_id, **fields)
                 db.add(sb); report["created"]["sale_batches"] += 1
             else:
                 ch = False
@@ -314,5 +354,5 @@ async def _apply(db, org_id, user_id, pw: ParsedWorkbook, farm_id, include_costi
 
     if include_costing:
         for kind, name, data in pw.docs:
-            await upsert_costing_doc(db, org_id, kind, name, data)
+            await upsert_costing_doc(db, org_id, kind, name, data, cycle_id)
             report["created"]["costing_documents"] += 1

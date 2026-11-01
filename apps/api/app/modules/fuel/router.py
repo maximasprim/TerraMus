@@ -14,6 +14,7 @@ from app.modules.finance.models import FinanceTransaction
 from app.modules.fuel.models import FuelLog
 from app.modules.identity.deps import require_permission
 from app.modules.identity.models import User
+from app.modules.cycles.deps import CycleSel, apply_col, cycle_filter, ensure_writable
 
 router = APIRouter(prefix="/api/v1/fuel", tags=["fuel"])
 ACTIVITY = "^(livestock|feedlot|dairy|crops|fodder|poultry|fish|rabbits|training|general)$"
@@ -30,13 +31,15 @@ class FuelCreate(BaseModel):
     farm_id: uuid.UUID | None = None
     driver: str | None = Field(default=None, max_length=120)
     post_to_finance: bool = True
+    production_cycle_id: uuid.UUID | None = None
 
 
 def _out(f: FuelLog, asset_name: str | None = None) -> dict:
     return {"id": str(f.id), "asset_id": str(f.asset_id), "asset": asset_name, "date": f.log_date.isoformat(), "litres": float(f.litres),
             "cost": float(f.cost), "cost_per_litre": round(float(f.cost) / float(f.litres), 2) if f.litres else None,
             "meter_reading": float(f.meter_reading) if f.meter_reading is not None else None, "purpose": f.purpose,
-            "activity": f.activity, "driver": f.driver}
+            "activity": f.activity, "driver": f.driver,
+            "production_cycle_id": str(f.production_cycle_id) if f.production_cycle_id else None}
 
 
 @router.post("", status_code=201)
@@ -45,12 +48,15 @@ async def log_fuel(req: FuelCreate, user: User = Depends(require_permission("ass
     if not asset:
         raise HTTPException(404, "Asset not found")
     farm_id = req.farm_id or asset.assigned_farm_id
+    await ensure_writable(db, user.organization_id, req.production_cycle_id)
     f = FuelLog(organization_id=user.organization_id, asset_id=asset.id, farm_id=farm_id, log_date=req.log_date, litres=req.litres,
-                cost=req.cost, meter_reading=req.meter_reading, purpose=req.purpose, activity=req.activity, driver=req.driver, created_by=user.id)
+                cost=req.cost, meter_reading=req.meter_reading, purpose=req.purpose, activity=req.activity, driver=req.driver,
+                production_cycle_id=req.production_cycle_id, created_by=user.id)
     db.add(f); await db.flush()
     if req.post_to_finance and req.cost > 0:     # same transaction: the expense can't be missing
         t = FinanceTransaction(organization_id=user.organization_id, transaction_type="expense", category="fuel", amount=req.cost,
                                transaction_date=req.log_date, farm_id=farm_id, activity=req.activity,
+                               production_cycle_id=req.production_cycle_id,
                                description=f"Fuel: {asset.name} {float(req.litres):g}L", reference_type="fuel_log", reference_id=f.id, created_by=user.id)
         db.add(t); await db.flush(); f.finance_transaction_id = t.id
     await db.commit()
@@ -59,8 +65,10 @@ async def log_fuel(req: FuelCreate, user: User = Depends(require_permission("ass
 
 @router.get("")
 async def list_fuel(asset_id: uuid.UUID | None = Query(None), start_date: date | None = Query(None), end_date: date | None = Query(None),
-                    user: User = Depends(require_permission("assets.manage")), db: AsyncSession = Depends(get_db)):
+                    user: User = Depends(require_permission("assets.manage")), db: AsyncSession = Depends(get_db),
+                    cycle: CycleSel | None = Depends(cycle_filter)):
     q = select(FuelLog, Asset.name).join(Asset, Asset.id == FuelLog.asset_id).where(FuelLog.organization_id == user.organization_id)
+    q = apply_col(q, FuelLog.production_cycle_id, cycle)
     if asset_id: q = q.where(FuelLog.asset_id == asset_id)
     if start_date: q = q.where(FuelLog.log_date >= start_date)
     if end_date: q = q.where(FuelLog.log_date <= end_date)
@@ -69,11 +77,12 @@ async def list_fuel(asset_id: uuid.UUID | None = Query(None), start_date: date |
 
 @router.get("/summary")
 async def fuel_summary(start_date: date = Query(...), end_date: date = Query(...), user: User = Depends(require_permission("assets.manage")),
-                       db: AsyncSession = Depends(get_db)):
+                       db: AsyncSession = Depends(get_db), cycle: CycleSel | None = Depends(cycle_filter)):
     """Litres, cost and consumption per asset (litres per hour/km from consecutive meter readings)."""
-    rows = (await db.execute(select(FuelLog, Asset.name).join(Asset, Asset.id == FuelLog.asset_id).where(
-        FuelLog.organization_id == user.organization_id, FuelLog.log_date >= start_date, FuelLog.log_date <= end_date)
-        .order_by(FuelLog.log_date, FuelLog.created_at))).all()
+    fq = apply_col(select(FuelLog, Asset.name).join(Asset, Asset.id == FuelLog.asset_id).where(
+        FuelLog.organization_id == user.organization_id, FuelLog.log_date >= start_date, FuelLog.log_date <= end_date),
+        FuelLog.production_cycle_id, cycle)
+    rows = (await db.execute(fq.order_by(FuelLog.log_date, FuelLog.created_at))).all()
     per, month = defaultdict(lambda: {"litres": Decimal("0"), "cost": Decimal("0"), "fills": 0, "readings": []}), defaultdict(lambda: {"litres": Decimal("0"), "cost": Decimal("0")})
     act = defaultdict(lambda: Decimal("0"))
     for f, name in rows:

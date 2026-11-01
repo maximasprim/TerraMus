@@ -28,6 +28,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.feedlot import metrics, service
 from app.modules.feedlot.models import IntakeBatch, SaleBatch
+from app.modules.cycles.deps import CycleSel, apply_col, ensure_writable
+from app.modules.cycles import resolve as cyc_resolve
 
 YELLOW = PatternFill("solid", fgColor="FFFFFF00")
 GREEN, CYAN, RED = (PatternFill("solid", bgColor=c, fgColor=c) for c in ("FF00FF00", "FF00FFFF", "FFFF0000"))
@@ -104,19 +106,29 @@ class Bundle:
         self.perf: dict = {}
 
 
-async def gather(db: AsyncSession, org_id: uuid.UUID, as_of: date | None) -> Bundle:
+async def gather(db: AsyncSession, org_id: uuid.UUID, as_of: date | None, cycle: CycleSel | None = None) -> Bundle:
     b = Bundle()
     b.s = metrics.get_settings(await service._settings_data(db, org_id))
-    b.batches = list((await db.execute(select(IntakeBatch).where(IntakeBatch.organization_id == org_id).order_by(IntakeBatch.batch_number))).scalars())
-    b.sale_batches = list((await db.execute(select(SaleBatch).where(SaleBatch.organization_id == org_id).order_by(SaleBatch.batch_number))).scalars())
-    b.items = await service._load(db, org_id)
-    for d in await service.list_costing_docs(db, org_id):
+    b.batches = list((await db.execute(apply_col(select(IntakeBatch).where(IntakeBatch.organization_id == org_id),
+                                                 IntakeBatch.production_cycle_id, cycle).order_by(IntakeBatch.batch_number))).scalars())
+    sbq = select(SaleBatch).where(SaleBatch.organization_id == org_id)
+    if cycle is not None:
+        sbq = sbq.where(cyc_resolve.sale_batch_in(org_id, cycle))
+    b.sale_batches = list((await db.execute(sbq.order_by(SaleBatch.batch_number))).scalars())
+    b.items = [(inp, meta) for inp, meta in await service._load(db, org_id) if service._in_cycle(meta, cycle)]
+    docs = await service.list_costing_docs(db, org_id)
+    if cycle is not None and not cycle.unassigned:       # the cycle's own documents, else the organisation-level ones
+        own = {d.kind for d in docs if d.production_cycle_id == cycle.id}
+        docs = [d for d in docs if d.production_cycle_id == cycle.id or (d.production_cycle_id is None and d.kind not in own)]
+    else:
+        docs = [d for d in docs if d.production_cycle_id is None]
+    for d in docs:
         b.docs[d.kind].append(d)
     all_w = [d for inp, _ in b.items for d, _ in inp.weights]
     ex_d = [inp.exit_date for inp, _ in b.items if inp.exit_date]
     b.as_of = as_of or max(all_w + ex_d + [date.today()] if not (all_w or ex_d) else all_w + ex_d)
-    b.profit = await service.profitability(db, org_id, b.as_of)
-    b.perf = await service.performance(db, org_id, b.as_of)
+    b.profit = await service.profitability(db, org_id, b.as_of, cycle=cycle)
+    b.perf = await service.performance(db, org_id, b.as_of, cycle=cycle)
     return b
 
 
@@ -741,8 +753,9 @@ CORRECTIONS = [
 
 
 # --------------------------------------------------------------------- driver
-async def export_worksheet(db: AsyncSession, org_id: uuid.UUID, as_of: date | None = None) -> tuple[bytes, dict]:
-    b = await gather(db, org_id, as_of)
+async def export_worksheet(db: AsyncSession, org_id: uuid.UUID, as_of: date | None = None,
+                           cycle: CycleSel | None = None) -> tuple[bytes, dict]:
+    b = await gather(db, org_id, as_of, cycle)
     wb = Workbook()
     wb.remove(wb.active)
     by_batch: dict[int, list[metrics.AnimalInput]] = defaultdict(list)

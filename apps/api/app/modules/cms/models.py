@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import String, Text, Integer, Boolean, Date, DateTime, ForeignKey
+from sqlalchemy import String, Text, Integer, Boolean, Date, DateTime, ForeignKey, LargeBinary
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -79,3 +79,20 @@ class Banner(Base, UUIDPKMixin):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     starts_at: Mapped[date | None] = mapped_column(Date, nullable=True)
     ends_at: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+
+class SiteImage(Base, UUIDPKMixin, TimestampMixin):
+    """An image a farm uploaded from its device for the public site - today a logo or a banner - instead of
+    pasting a URL. The processed JPEG bytes (see commerce/images.py) live either in `data` (STORAGE_BACKEND=database)
+    or in the storage bucket under `storage_key` (STORAGE_BACKEND=supabase); `FarmProfile.logo_url` /
+    `Banner.image_url` simply hold this image's public URL, so everything that renders them is unchanged."""
+    __tablename__ = "site_images"
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    kind: Mapped[str] = mapped_column(String(16))  # "logo" | "banner"
+    content_type: Mapped[str] = mapped_column(String(32), default="image/jpeg")
+    width: Mapped[int] = mapped_column(Integer)
+    height: Mapped[int] = mapped_column(Integer)
+    size_bytes: Mapped[int] = mapped_column(Integer)
+    data: Mapped[bytes | None] = mapped_column(LargeBinary, deferred=True, nullable=True)
+    storage_key: Mapped[str | None] = mapped_column(String(255), nullable=True)

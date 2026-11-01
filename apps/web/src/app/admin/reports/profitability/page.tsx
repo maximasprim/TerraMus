@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { AdminShell } from "@/components/admin-shell";
 import { Card, ErrorState, EmptyState } from "@/components/ui";
+import { CropProfitability } from "@/components/crop-profitability";
 import { apiFetch, ApiError } from "@/lib/api";
 import type { AnimalProfitabilityBreakdown, AnimalProfitabilityDetail, ProfitabilityReport } from "@/lib/types";
 
@@ -44,6 +45,7 @@ const OUTCOME_STYLE: Record<string, string> = {
 const OUTCOME_LABEL: Record<string, string> = { sold: "Sold", culled: "Culled", died: "Died", active: "On farm" };
 
 export default function ProfitabilityReportPage() {
+  const [view, setView] = useState<"animals" | "crops">("animals");
   const [filter, setFilter] = useState<Filter>("all");
   const [expanded, setExpanded] = useState<string | null>(null);
   const { data, isLoading, error } = useQuery<ProfitabilityReport>({
@@ -70,11 +72,20 @@ export default function ProfitabilityReportPage() {
         </p>
       </div>
 
-      {error && <ErrorState message={error instanceof ApiError ? error.message : "Failed to load report"} />}
-      {isLoading && <p className="text-sm text-muted">Loading…</p>}
-      {data && data.animals.length === 0 && <EmptyState title="No data yet" body="Profitability appears once animals have recorded costs." />}
+      <div className="mb-6 flex gap-1 border-b border-hairline">
+        {([["animals", "Animals"], ["crops", "Crops"]] as const).map(([k, label]) => (
+          <button key={k} onClick={() => setView(k)}
+            className={`border-b-2 px-4 py-2 text-sm font-medium transition-colors ${view === k ? "border-brass text-forest" : "border-transparent text-muted hover:text-ink"}`}>{label}</button>
+        ))}
+      </div>
 
-      {data && data.animals.length > 0 && (
+      {view === "crops" && <CropProfitability />}
+
+      {view === "animals" && error && <ErrorState message={error instanceof ApiError ? error.message : "Failed to load report"} />}
+      {view === "animals" && isLoading && <p className="text-sm text-muted">Loading…</p>}
+      {view === "animals" && data && data.animals.length === 0 && <EmptyState title="No data yet" body="Profitability appears once animals have recorded costs." />}
+
+      {view === "animals" && data && data.animals.length > 0 && (
         <>
           {totals && (
             <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">

@@ -8,6 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.finance.models import FinanceTransaction, Invoice, InvoiceCounter
 from app.modules.finance import schemas
+from app.modules.cycles import resolve as cyc_resolve
+from app.modules.cycles.deps import CycleSel
 
 
 async def record_transaction(
@@ -19,6 +21,7 @@ async def record_transaction(
         amount=req.amount, transaction_date=req.transaction_date, description=req.description,
         reference_type=reference_type, reference_id=reference_id, created_by=user_id,
         farm_id=getattr(req, "farm_id", None), activity=getattr(req, "activity", None),
+        production_cycle_id=getattr(req, "production_cycle_id", None),
     )
     db.add(txn)
     await db.commit()
@@ -30,9 +33,11 @@ async def list_transactions(
     db: AsyncSession, org_id: uuid.UUID,
     start_date: date | None = None, end_date: date | None = None,
     transaction_type: str | None = None, category: str | None = None,
-    farm_id: uuid.UUID | None = None, activity: str | None = None,
+    farm_id: uuid.UUID | None = None, activity: str | None = None, cycle: CycleSel | None = None,
 ) -> list[FinanceTransaction]:
     query = select(FinanceTransaction).where(FinanceTransaction.organization_id == org_id)
+    if cycle is not None:
+        query = query.where(cyc_resolve.ledger_cond(cycle))
     if start_date:
         query = query.where(FinanceTransaction.transaction_date >= start_date)
     if end_date:
@@ -46,20 +51,34 @@ async def list_transactions(
     if activity:
         query = query.where(FinanceTransaction.activity == activity)
     result = await db.execute(query.order_by(FinanceTransaction.transaction_date.desc()))
-    return list(result.scalars().all())
+    rows = list(result.scalars().all())
+    await _attach_effective_cycle(db, rows)
+    return rows
 
 
-async def get_summary(db: AsyncSession, org_id: uuid.UUID, start_date: date, end_date: date) -> schemas.FinanceSummary:
+async def _attach_effective_cycle(db: AsyncSession, rows: list[FinanceTransaction]) -> None:
+    """Expose each row's derived cycle on the response without storing it."""
+    if not rows:
+        return
+    eff = dict((await db.execute(select(FinanceTransaction.id, cyc_resolve.ledger_cycle())
+                                 .where(FinanceTransaction.id.in_([r.id for r in rows])))).all())
+    for r in rows:
+        r.effective_cycle_id = eff.get(r.id)
+
+
+async def get_summary(db: AsyncSession, org_id: uuid.UUID, start_date: date, end_date: date,
+                      cycle: CycleSel | None = None) -> schemas.FinanceSummary:
     """Spec §23/§24 - daily/monthly revenue, expenses, net income, expense breakdown."""
-    rows = await db.execute(
-        select(FinanceTransaction.transaction_type, FinanceTransaction.category, func.sum(FinanceTransaction.amount))
-        .where(
+    q = (select(FinanceTransaction.transaction_type, FinanceTransaction.category, func.sum(FinanceTransaction.amount))
+         .where(
             FinanceTransaction.organization_id == org_id,
             FinanceTransaction.transaction_date >= start_date,
             FinanceTransaction.transaction_date <= end_date,
-        )
-        .group_by(FinanceTransaction.transaction_type, FinanceTransaction.category)
-    )
+         )
+         .group_by(FinanceTransaction.transaction_type, FinanceTransaction.category))
+    if cycle is not None:
+        q = q.where(cyc_resolve.ledger_cond(cycle))
+    rows = await db.execute(q)
     income_by_category: dict[str, Decimal] = {}
     expense_by_category: dict[str, Decimal] = {}
     for txn_type, category, total in rows.all():
@@ -162,7 +181,8 @@ _ACTIVITY_BY_CATEGORY = {
 
 
 async def get_profitability(db: AsyncSession, org_id: uuid.UUID, start_date: date, end_date: date,
-                            farm_id: uuid.UUID | None = None, activity: str | None = None) -> dict:
+                            farm_id: uuid.UUID | None = None, activity: str | None = None,
+                            cycle: CycleSel | None = None) -> dict:
     """Income/expense/net by activity, by sub-farm, by category and by month. Rows with no recorded
     activity use a category-based default (livestock_sale -> livestock ...), else 'unassigned'."""
     from app.modules.farm.models import Farm
@@ -173,6 +193,8 @@ async def get_profitability(db: AsyncSession, org_id: uuid.UUID, start_date: dat
          .group_by(T.transaction_type, T.activity, T.farm_id, T.category, month))
     if farm_id:
         q = q.where(T.farm_id == farm_id)
+    if cycle is not None:
+        q = q.where(cyc_resolve.ledger_cond(cycle, T))
     rows = (await db.execute(q)).all()
     names = {f.id: f.name for f in (await db.execute(select(Farm).where(Farm.organization_id == org_id))).scalars()}
 

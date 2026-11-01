@@ -16,10 +16,10 @@ from app.modules.payments import schemas as payment_schemas
 # internal *Out schema (AnimalOut, ListingOut, etc.) directly.
 router = APIRouter(prefix="/api/v1/public/{org_slug}", tags=["public"])
 
-# Separate router (no {org_slug} in its prefix — there IS no slug yet at
+# Separate router (no {org_slug} in its prefix - there IS no slug yet at
 # this point, that's the whole reason this endpoint exists) for the
 # frontend's Next.js middleware (apps/web/src/middleware.ts) to call on
-# every request to a hostname that isn't the app's own — turning "what
+# every request to a hostname that isn't the app's own - turning "what
 # domain is this" into "which org's /shop/{slug} to actually serve".
 # Registered separately in main.py alongside `router`.
 domain_router = APIRouter(prefix="/api/v1/public", tags=["public"])
@@ -44,13 +44,13 @@ async def payment_methods():
 @domain_router.get("/resolve-domain", response_model=schemas.ResolveDomainOut | None)
 async def resolve_domain(host: str = Query(...), db: AsyncSession = Depends(get_db)):
     """Returns the org slug for a VERIFIED custom domain, or null if the
-    host isn't a recognized/verified tenant domain — the middleware falls
+    host isn't a recognized/verified tenant domain - the middleware falls
     back to normal routing (404, or the marketing site) in that case rather
     than silently trusting an unverified or unknown Host header."""
     from app.modules.identity.service import get_organization_by_verified_domain
 
     # Strip a port if present (e.g. local dev hitting "farm.example.com:3000")
-    # and normalize case — DNS/HTTP hosts are case-insensitive.
+    # and normalize case - DNS/HTTP hosts are case-insensitive.
     host = host.split(":")[0].lower()
     org = await get_organization_by_verified_domain(db, host)
     if not org:

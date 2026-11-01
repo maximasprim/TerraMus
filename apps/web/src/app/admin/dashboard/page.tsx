@@ -39,17 +39,21 @@ export default function DashboardPage() {
         <>
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
             <StatCard label="Total herd" value={String(data.total_animals)} hint={`${data.active_animals} active`} />
-            <StatCard label="Herd value" value={`KES ${Number(data.herd_value).toLocaleString()}`} />
+            <StatCard
+              label="Herd value"
+              value={`KES ${Number(data.herd_value).toLocaleString()}`}
+              hint={data.herd_value_estimated ? "Includes an estimate (weight × last sale price)" : undefined}
+            />
             <StatCard label="For sale" value={String(data.animals_for_sale)} />
             <StatCard label="Reserved" value={String(data.animals_reserved)} />
             <StatCard label="Today's milk" value={`${data.todays_milk_liters} L`} />
             <StatCard label="Inventory value" value={`KES ${Number(data.inventory_value).toLocaleString()}`} />
             <StatCard
-              label="This month's revenue"
+              label={data.finance_period === "cycle" ? "Cycle revenue to date" : "This month's revenue"}
               value={`KES ${Number(data.monthly_revenue).toLocaleString()}`}
             />
             <StatCard
-              label="Est. monthly profit"
+              label={data.finance_period === "cycle" ? "Cycle profit to date" : "Est. monthly profit"}
               value={`KES ${Number(data.estimated_monthly_profit).toLocaleString()}`}
             />
             < StatCard

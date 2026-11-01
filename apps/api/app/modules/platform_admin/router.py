@@ -10,6 +10,7 @@ from app.core.middleware import rate_limit_auth
 from app.modules.platform_admin import analytics as platform_analytics_service, analytics_schemas, schemas, service
 from app.modules.platform_admin.deps import get_current_platform_admin, require_write_access
 from app.modules.platform_admin.models import PlatformAdmin
+from app.modules.billing import schemas as billing_schemas, service as billing_service
 
 # livestock reused as-is, unmodified, to prove the cross-tenant CRUD pattern -
 # see the module docstring below for why this generalizes to every other
@@ -119,6 +120,27 @@ async def set_organization_status(
     return await service.set_organization_status(db, org_id, admin.id, req.is_suspended, req.reason)
 
 
+@router.get("/billing/tiers", response_model=list[billing_schemas.SubscriptionTierOut])
+async def list_plans(
+    admin: PlatformAdmin = Depends(get_current_platform_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """The plans a superadmin can put a tenant on (for the 'Change plan' control)."""
+    return await billing_service.list_tiers(db)
+
+
+@router.patch("/organizations/{org_id}/subscription", response_model=schemas.OrganizationSummaryOut)
+async def set_organization_subscription(
+    org_id: uuid.UUID,
+    req: schemas.OrganizationSubscriptionUpdate,
+    admin: PlatformAdmin = Depends(require_write_access),
+    db: AsyncSession = Depends(get_db),
+):
+    """Set a tenant's plan directly, without a payment. Rejected (400) when the tenant's current users/animals
+    already exceed the new plan's limits; audited as 'organization.subscription_change'."""
+    return await service.set_organization_subscription(db, org_id, admin.id, req)
+
+
 # ------------------------------------------------------ catalog visibility --
 # Superadmin control over what a tenant sees/can use (spec: "superadmin
 # controls what tenants want visible"). Reference-list endpoints are plain
@@ -136,6 +158,12 @@ async def list_species_catalog(admin: PlatformAdmin = Depends(get_current_platfo
 async def list_crop_type_catalog(admin: PlatformAdmin = Depends(get_current_platform_admin)):
     """The full crop-type reference catalog, same purpose as the species list above."""
     return catalog_service.full_crop_type_reference()
+
+
+@router.get("/catalog/menus", response_model=list[catalog_schemas.MenuEntryOut])
+async def list_menu_catalog(admin: PlatformAdmin = Depends(get_current_platform_admin)):
+    """Every tenant sidebar entry, grouped - for the per-tenant 'which menus can this org see' checklist."""
+    return catalog_schemas.menu_entries()
 
 
 @router.get("/organizations/{org_id}/catalog-settings", response_model=catalog_schemas.TenantCatalogSettingsOut)

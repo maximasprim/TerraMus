@@ -74,6 +74,7 @@ class PurchaseOrderCreate(BaseModel):
     expected_delivery_date: date | None = None
     notes: str | None = None
     items: list[PurchaseOrderItemCreate] = Field(min_length=1)
+    production_cycle_id: uuid.UUID | None = None
 
 
 class PurchaseOrderStatusUpdate(BaseModel):
@@ -102,6 +103,7 @@ class PurchaseOrderOut(BaseModel):
     notes: str | None
     requested_by: uuid.UUID | None
     approved_by: uuid.UUID | None
+    production_cycle_id: uuid.UUID | None = None
     total_amount: Decimal
     items: list[PurchaseOrderItemOut]
     created_at: datetime

@@ -64,6 +64,7 @@ export function isNetworkFailure(e: unknown): boolean {
 }
 
 import { fetchAllPages, formatErrorDetail, type FetchAllOptions } from "@/lib/api-utils";
+import { scopeBody, scopePath } from "@/lib/cycle-scope";
 
 export class ApiError extends Error {
   status: number;
@@ -117,9 +118,13 @@ async function performRefresh(): Promise<string | null> {
 
 export async function apiFetch<T>(
   path: string,
-  options: RequestInit & { auth?: boolean } = {},
+  options: RequestInit & { auth?: boolean; cycleScope?: boolean } = {},
 ): Promise<T> {
-  const { auth = true, headers, ...rest } = options;
+  const { auth = true, cycleScope = true, headers, ...opts } = options;
+  // Production-cycle filter (see lib/cycle-scope.ts): lists/reports are narrowed to the cycle chosen in the
+  // header and new records are stamped with it. `cycleScope: false` opts a call out (e.g. the cycles page itself).
+  const rest = cycleScope ? { ...opts, body: scopeBody(path, opts.method, opts.body) } : opts;
+  if (cycleScope) path = scopePath(path, opts.method);
   const doFetch = async (token: string | null) => {
     const finalHeaders: Record<string, string> = {
       "Content-Type": "application/json",
@@ -194,6 +199,7 @@ export async function apiUpload<T>(
 /** For binary responses (invoice/report PDFs, animal QR SVGs) - triggers a
  * browser download rather than trying to parse the response as JSON. */
 export async function apiDownload(path: string, filename: string): Promise<void> {
+  path = scopePath(path, "GET");        // exports follow the selected production cycle too
   const doFetch = (token: string | null) =>
     fetch(`${API_BASE}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : undefined });
 

@@ -5,7 +5,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.events import publish
@@ -15,6 +15,9 @@ from app.modules.feedlot.models import (
 )
 from app.modules.livestock import schemas as livestock_schemas, service as livestock_service
 from app.modules.livestock.models import INACTIVE_STATUSES, Animal, WeightRecord
+from app.modules.cycles import resolve as cyc_resolve
+from app.modules.cycles.deps import CycleSel, apply_col, ensure_writable
+from app.modules.cycles.models import ProductionCycle
 
 
 def _day_start(d: date) -> datetime:
@@ -26,9 +29,24 @@ def _404(what: str) -> HTTPException:
 
 
 # ------------------------------------------------------------------ batches
-async def _next_number(db: AsyncSession, model, org_id: uuid.UUID) -> int:
-    r = await db.execute(select(func.coalesce(func.max(model.batch_number), 0)).where(model.organization_id == org_id))
-    return int(r.scalar_one()) + 1
+async def _next_number(db: AsyncSession, model, org_id: uuid.UUID, cycle_id: uuid.UUID | None = None) -> int:
+    """Next free batch number. Numbers restart in every production cycle, so with a cycle it is the next number
+    inside that cycle; without one it is the next number across the organisation (as before)."""
+    q = select(func.coalesce(func.max(model.batch_number), 0)).where(model.organization_id == org_id)
+    if cycle_id is not None:
+        q = q.where(model.production_cycle_id == cycle_id)
+    return int((await db.execute(q)).scalar_one()) + 1
+
+
+async def _number_taken(db: AsyncSession, model, org_id: uuid.UUID, cycle_id: uuid.UUID | None, number: int,
+                        exclude_id: uuid.UUID | None = None) -> bool:
+    """Is this batch number already used? Inside the cycle when one is given; org-wide when none is (as before)."""
+    q = select(model.id).where(model.organization_id == org_id, model.batch_number == number)
+    if cycle_id is not None:
+        q = q.where(model.production_cycle_id == cycle_id)
+    if exclude_id is not None:
+        q = q.where(model.id != exclude_id)
+    return (await db.execute(q.limit(1))).first() is not None
 
 
 async def _intake_counts(db: AsyncSession, org_id: uuid.UUID) -> dict[uuid.UUID, tuple[int, int]]:
@@ -49,9 +67,9 @@ def _intake_out(b: IntakeBatch, counts: dict) -> schemas.IntakeBatchOut:
     return out
 
 
-async def list_intake_batches(db, org_id):
-    rows = (await db.execute(select(IntakeBatch).where(IntakeBatch.organization_id == org_id)
-                             .order_by(IntakeBatch.batch_number))).scalars().all()
+async def list_intake_batches(db, org_id, cycle: CycleSel | None = None):
+    q = apply_col(select(IntakeBatch).where(IntakeBatch.organization_id == org_id), IntakeBatch.production_cycle_id, cycle)
+    rows = (await db.execute(q.order_by(IntakeBatch.batch_number))).scalars().all()
     counts = await _intake_counts(db, org_id)
     return [_intake_out(b, counts) for b in rows]
 
@@ -65,11 +83,11 @@ async def get_intake_batch(db, org_id, batch_id) -> IntakeBatch:
 
 
 async def create_intake_batch(db, org_id, req: schemas.IntakeBatchCreate) -> schemas.IntakeBatchOut:
-    number = req.batch_number or await _next_number(db, IntakeBatch, org_id)
-    dup = (await db.execute(select(IntakeBatch.id).where(IntakeBatch.organization_id == org_id,
-                                                         IntakeBatch.batch_number == number))).first()
-    if dup:
-        raise HTTPException(status.HTTP_409_CONFLICT, f"Intake batch {number} already exists")
+    number = req.batch_number or await _next_number(db, IntakeBatch, org_id, req.production_cycle_id)
+    if await _number_taken(db, IntakeBatch, org_id, req.production_cycle_id, number):
+        raise HTTPException(status.HTTP_409_CONFLICT, f"Intake batch {number} already exists"
+                            + (" in this cycle" if req.production_cycle_id else ""))
+    await ensure_writable(db, org_id, req.production_cycle_id)
     data = req.model_dump(exclude={"batch_number", "name"})
     b = IntakeBatch(organization_id=org_id, batch_number=number, name=req.name or f"BATCH {number}", **data)
     db.add(b)
@@ -80,11 +98,58 @@ async def create_intake_batch(db, org_id, req: schemas.IntakeBatchCreate) -> sch
 
 async def update_intake_batch(db, org_id, batch_id, req: schemas.IntakeBatchUpdate) -> schemas.IntakeBatchOut:
     b = await get_intake_batch(db, org_id, batch_id)
-    for k, v in req.model_dump(exclude_unset=True).items():
+    changes = req.model_dump(exclude_unset=True)
+    if "production_cycle_id" in changes and changes["production_cycle_id"] != b.production_cycle_id:
+        await _guard_cycle_move(db, org_id, b.production_cycle_id, changes["production_cycle_id"])
+        if changes["production_cycle_id"] and await _number_taken(db, IntakeBatch, org_id, changes["production_cycle_id"], b.batch_number, b.id):
+            raise HTTPException(status.HTTP_409_CONFLICT, f"The target cycle already has an intake batch numbered {b.batch_number}")
+    for k, v in changes.items():
         setattr(b, k, v)
     await db.commit()
     await db.refresh(b)
     return _intake_out(b, await _intake_counts(db, org_id))
+
+
+async def _guard_cycle_move(db, org_id, current: uuid.UUID | None, target: uuid.UUID | None) -> None:
+    """Moving a batch between cycles changes both cycles' books, so the cycle it leaves must not be closed and
+    the one it joins must be open for writing."""
+    if current:
+        from app.modules.cycles.deps import get_cycle
+        old = await get_cycle(db, org_id, current)
+        if old.status == "closed":
+            raise HTTPException(status.HTTP_409_CONFLICT, f"Production cycle '{old.name}' is closed; reopen it before moving records out of it.")
+    await ensure_writable(db, org_id, target)
+
+
+async def _closed_cycle_name(db, org_id, animal_ids) -> str | None:
+    """Name of a CLOSED cycle that any of these animals belongs to (None if none do)."""
+    ids = list(animal_ids)
+    if not ids:
+        return None
+    return (await db.execute(
+        select(ProductionCycle.name).select_from(FeedlotAnimal)
+        .join(IntakeBatch, IntakeBatch.id == FeedlotAnimal.intake_batch_id)
+        .join(ProductionCycle, ProductionCycle.id == IntakeBatch.production_cycle_id)
+        .where(FeedlotAnimal.organization_id == org_id, FeedlotAnimal.animal_id.in_(ids),
+               ProductionCycle.status == "closed").limit(1))).scalar_one_or_none()
+
+
+async def _closed_cycle_names(db, org_id, animal_ids) -> dict[uuid.UUID, str]:
+    """animal id -> name of the CLOSED cycle it belongs to (animals in open or no cycle are absent)."""
+    ids = list(animal_ids)
+    if not ids:
+        return {}
+    rows = await db.execute(
+        select(FeedlotAnimal.animal_id, ProductionCycle.name).select_from(FeedlotAnimal)
+        .join(IntakeBatch, IntakeBatch.id == FeedlotAnimal.intake_batch_id)
+        .join(ProductionCycle, ProductionCycle.id == IntakeBatch.production_cycle_id)
+        .where(FeedlotAnimal.organization_id == org_id, FeedlotAnimal.animal_id.in_(ids), ProductionCycle.status == "closed"))
+    return {a: n for a, n in rows.all()}
+
+
+async def _assert_batch_cycle_open(db, org_id, batch: IntakeBatch) -> None:
+    if batch.production_cycle_id:
+        await ensure_writable(db, org_id, batch.production_cycle_id)
 
 
 async def delete_intake_batch(db, org_id, batch_id) -> None:
@@ -113,9 +178,11 @@ def _sale_out(b: SaleBatch, totals: dict) -> schemas.SaleBatchOut:
     return out
 
 
-async def list_sale_batches(db, org_id):
-    rows = (await db.execute(select(SaleBatch).where(SaleBatch.organization_id == org_id)
-                             .order_by(SaleBatch.batch_number))).scalars().all()
+async def list_sale_batches(db, org_id, cycle: CycleSel | None = None):
+    q = select(SaleBatch).where(SaleBatch.organization_id == org_id)
+    if cycle is not None:
+        q = q.where(cyc_resolve.sale_batch_in(org_id, cycle))
+    rows = (await db.execute(q.order_by(SaleBatch.batch_number))).scalars().all()
     totals = await _sale_totals(db, org_id)
     return [_sale_out(b, totals) for b in rows]
 
@@ -129,11 +196,11 @@ async def get_sale_batch(db, org_id, batch_id) -> SaleBatch:
 
 
 async def create_sale_batch(db, org_id, req: schemas.SaleBatchCreate) -> schemas.SaleBatchOut:
-    number = req.batch_number or await _next_number(db, SaleBatch, org_id)
-    dup = (await db.execute(select(SaleBatch.id).where(SaleBatch.organization_id == org_id,
-                                                       SaleBatch.batch_number == number))).first()
-    if dup:
-        raise HTTPException(status.HTTP_409_CONFLICT, f"Sale batch {number} already exists")
+    number = req.batch_number or await _next_number(db, SaleBatch, org_id, req.production_cycle_id)
+    if await _number_taken(db, SaleBatch, org_id, req.production_cycle_id, number):
+        raise HTTPException(status.HTTP_409_CONFLICT, f"Sale batch {number} already exists"
+                            + (" in this cycle" if req.production_cycle_id else ""))
+    await ensure_writable(db, org_id, req.production_cycle_id)
     b = SaleBatch(organization_id=org_id, batch_number=number, **req.model_dump(exclude={"batch_number"}))
     db.add(b)
     await db.commit()
@@ -143,7 +210,12 @@ async def create_sale_batch(db, org_id, req: schemas.SaleBatchCreate) -> schemas
 
 async def update_sale_batch(db, org_id, batch_id, req: schemas.SaleBatchUpdate) -> schemas.SaleBatchOut:
     b = await get_sale_batch(db, org_id, batch_id)
-    for k, v in req.model_dump(exclude_unset=True).items():
+    changes = req.model_dump(exclude_unset=True)
+    if "production_cycle_id" in changes and changes["production_cycle_id"] != b.production_cycle_id:
+        await _guard_cycle_move(db, org_id, b.production_cycle_id, changes["production_cycle_id"])
+        if changes["production_cycle_id"] and await _number_taken(db, SaleBatch, org_id, changes["production_cycle_id"], b.batch_number, b.id):
+            raise HTTPException(status.HTTP_409_CONFLICT, f"The target cycle already has a sale batch numbered {b.batch_number}")
+    for k, v in changes.items():
         setattr(b, k, v)
     await db.commit()
     await db.refresh(b)
@@ -152,6 +224,7 @@ async def update_sale_batch(db, org_id, batch_id, req: schemas.SaleBatchUpdate) 
 
 # ------------------------------------------------- registering animals in a batch
 async def register_batch_animals(db, org_id, user_id, batch: IntakeBatch, req: schemas.RegisterAnimalsRequest) -> dict:
+    await _assert_batch_cycle_open(db, org_id, batch)
     farm_id = req.farm_id or batch.farm_id
     if not farm_id:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "farm_id is required (the batch has no farm set)")
@@ -188,6 +261,7 @@ async def register_batch_animals(db, org_id, user_id, batch: IntakeBatch, req: s
 
 
 async def link_existing_animals(db, org_id, batch: IntakeBatch, req: schemas.LinkExistingRequest) -> dict:
+    await _assert_batch_cycle_open(db, org_id, batch)
     results = []
     for item in req.animals:
         animal = (await db.execute(select(Animal).where(Animal.id == item.animal_id,
@@ -231,6 +305,7 @@ async def bulk_weigh(db, org_id, user_id, req: schemas.BulkWeighRequest) -> dict
             if day_lo <= w.recorded_at < day_hi:
                 existing_today[w.animal_id] = w
 
+    closed_by_animal = await _closed_cycle_names(db, org_id, aids)
     s = metrics.get_settings(await _settings_data(db, org_id))
     results, seen, recorded = [], set(), 0
     for e in req.entries:
@@ -243,6 +318,10 @@ async def bulk_weigh(db, org_id, user_id, req: schemas.BulkWeighRequest) -> dict
             results.append({"animal": label, "status": "duplicate_in_request"})
             continue
         seen.add(animal.id)
+        if animal.id in closed_by_animal:
+            results.append({"animal": label, "status": "cycle_closed",
+                            "detail": f"Production cycle '{closed_by_animal[animal.id]}' is closed; reopen it to record weights"})
+            continue
         if animal.status in INACTIVE_STATUSES:
             results.append({"animal": label, "status": "inactive_animal", "detail": animal.status})
             continue
@@ -282,12 +361,17 @@ async def bulk_weigh(db, org_id, user_id, req: schemas.BulkWeighRequest) -> dict
         await db.rollback()
     return {"dry_run": req.dry_run, "weighed_on": req.weighed_on.isoformat(), "recorded": recorded,
             "session_id": session_id, "results": results,
-            "problems": [r for r in results if r["status"] in ("unknown_animal", "inactive_animal", "duplicate_in_request")]}
+            "problems": [r for r in results if r["status"] in ("unknown_animal", "inactive_animal", "duplicate_in_request", "cycle_closed")]}
 
 
-async def list_weigh_sessions(db, org_id, limit: int = 100):
-    rows = (await db.execute(select(WeighSession).where(WeighSession.organization_id == org_id)
-                             .order_by(WeighSession.weighed_on.desc()).limit(limit))).scalars().all()
+async def list_weigh_sessions(db, org_id, limit: int = 100, cycle: CycleSel | None = None):
+    q = select(WeighSession).where(WeighSession.organization_id == org_id)
+    if cycle is not None:
+        # a weigh day belongs to a cycle when any animal of that cycle was weighed on that date
+        day = func.date(WeightRecord.recorded_at)
+        weighed = (select(day).where(WeightRecord.animal_id.in_(cyc_resolve.animal_ids_in(org_id, cycle))).distinct())
+        q = q.where(WeighSession.weighed_on.in_(weighed))
+    rows = (await db.execute(q.order_by(WeighSession.weighed_on.desc()).limit(limit))).scalars().all()
     return [{"id": str(r.id), "weighed_on": r.weighed_on.isoformat(), "scale_label": r.scale_label,
              "head_count": r.head_count, "notes": r.notes} for r in rows]
 
@@ -308,6 +392,9 @@ async def record_sale(db, org_id, user_id, animal: Animal, *, exit_date, weight,
         raise HTTPException(status.HTTP_409_CONFLICT, f"{animal.animal_number} has already left the feedlot")
     if animal.status in INACTIVE_STATUSES:
         raise HTTPException(status.HTTP_409_CONFLICT, f"{animal.animal_number} is {animal.status} and cannot be sold")
+    closed = await _closed_cycle_name(db, org_id, [animal.id])
+    if closed:
+        raise HTTPException(status.HTTP_409_CONFLICT, f"{animal.animal_number} belongs to closed production cycle '{closed}'. Reopen it to record a sale.")
     rate = price if price is not None else (sale_batch.price_per_kg if sale_batch else None)
     if rate is None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "price_per_kg is required (none on the sale batch either)")
@@ -338,6 +425,9 @@ async def record_cull(db, org_id, user_id, animal: Animal, req: schemas.CullRequ
         raise HTTPException(status.HTTP_409_CONFLICT, f"{animal.animal_number} has already left the feedlot")
     if animal.status in INACTIVE_STATUSES:
         raise HTTPException(status.HTTP_409_CONFLICT, f"{animal.animal_number} is already {animal.status}")
+    closed = await _closed_cycle_name(db, org_id, [animal.id])
+    if closed:
+        raise HTTPException(status.HTTP_409_CONFLICT, f"{animal.animal_number} belongs to closed production cycle '{closed}'. Reopen it to record this.")
     ex = FeedlotExit(organization_id=org_id, animal_id=animal.id, exit_type=req.exit_type, exit_date=req.exit_date,
                      exit_weight_kg=req.exit_weight_kg, amount=0, reason=req.reason, created_by=user_id)
     db.add(ex)
@@ -376,14 +466,26 @@ async def record_batch_sales(db, org_id, user_id, batch: SaleBatch, req: schemas
 # ------------------------------------------------------------------- costing docs
 async def _settings_data(db, org_id) -> dict:
     d = (await db.execute(select(CostingDocument).where(CostingDocument.organization_id == org_id,
-                                                        CostingDocument.kind == "settings"))).scalars().first()
+                                                        CostingDocument.kind == "settings",
+                                                        CostingDocument.production_cycle_id.is_(None)))).scalars().first()
     return d.data if d else {}
 
 
-async def _docs_by_kind(db, org_id) -> dict[str, list[CostingDocument]]:
+async def _docs_by_kind(db, org_id, cycle_id: uuid.UUID | None = None) -> dict[str, list[CostingDocument]]:
+    """Costing documents in force. With no cycle: the organisation-level documents only (exactly what existed
+    before production cycles). With a cycle: that cycle's own documents, and for any kind it has none of, the
+    organisation-level ones - so a cycle only overrides what it deliberately defines."""
     out: dict[str, list[CostingDocument]] = defaultdict(list)
-    for d in (await db.execute(select(CostingDocument).where(CostingDocument.organization_id == org_id)
-                               .order_by(CostingDocument.kind, CostingDocument.name))).scalars():
+    q = select(CostingDocument).where(CostingDocument.organization_id == org_id)
+    if cycle_id is None:
+        q = q.where(CostingDocument.production_cycle_id.is_(None))
+    else:
+        q = q.where(or_(CostingDocument.production_cycle_id.is_(None), CostingDocument.production_cycle_id == cycle_id))
+    docs = (await db.execute(q.order_by(CostingDocument.kind, CostingDocument.name))).scalars().all()
+    own_kinds = {d.kind for d in docs if cycle_id is not None and d.production_cycle_id == cycle_id}
+    for d in docs:
+        if d.kind in own_kinds and d.production_cycle_id is None:
+            continue
         out[d.kind].append(d)
     return out
 
@@ -433,17 +535,24 @@ async def _fodder_costs(db, org_id) -> dict[str, float]:
     return await cost_map(db, org_id)
 
 
-async def list_costing_docs(db, org_id, kind: str | None = None) -> list[schemas.CostingDocumentOut]:
-    by_kind = await _docs_by_kind(db, org_id)
+async def list_costing_docs(db, org_id, kind: str | None = None, cycle: CycleSel | None = None) -> list[schemas.CostingDocumentOut]:
+    """No cycle selection: every document (organisation-level first, then each cycle's own). A cycle: only that
+    cycle's own documents. 'unassigned': only the organisation-level ones."""
     fodder = await _fodder_costs(db, org_id)
+    q = select(CostingDocument).where(CostingDocument.organization_id == org_id)
+    if kind:
+        q = q.where(CostingDocument.kind == kind)
+    q = apply_col(q, CostingDocument.production_cycle_id, cycle)
+    docs = (await db.execute(q.order_by(CostingDocument.production_cycle_id.is_not(None), CostingDocument.kind,
+                                        CostingDocument.name))).scalars().all()
+    contexts: dict[uuid.UUID | None, dict] = {}
     out = []
-    for k, docs in by_kind.items():
-        if kind and k != kind:
-            continue
-        for d in docs:
-            o = schemas.CostingDocumentOut.model_validate(d)
-            o.computed = _compute(d, by_kind, fodder)
-            out.append(o)
+    for d in docs:
+        if d.production_cycle_id not in contexts:
+            contexts[d.production_cycle_id] = await _docs_by_kind(db, org_id, d.production_cycle_id)
+        o = schemas.CostingDocumentOut.model_validate(d)
+        o.computed = _compute(d, contexts[d.production_cycle_id], fodder)
+        out.append(o)
     return out
 
 
@@ -455,32 +564,39 @@ async def _get_doc(db, org_id, doc_id) -> CostingDocument:
     return d
 
 
-async def upsert_costing_doc(db, org_id, kind: str, name: str, data: dict) -> CostingDocument:
+async def upsert_costing_doc(db, org_id, kind: str, name: str, data: dict,
+                             cycle_id: uuid.UUID | None = None) -> CostingDocument:
     _validate_doc(kind, data)
-    d = (await db.execute(select(CostingDocument).where(CostingDocument.organization_id == org_id,
-                                                        CostingDocument.kind == kind,
-                                                        CostingDocument.name == name))).scalar_one_or_none()
+    q = select(CostingDocument).where(CostingDocument.organization_id == org_id, CostingDocument.kind == kind,
+                                      CostingDocument.name == name)
+    q = q.where(CostingDocument.production_cycle_id.is_(None) if cycle_id is None
+                else CostingDocument.production_cycle_id == cycle_id)
+    d = (await db.execute(q)).scalar_one_or_none()
     if d:
         d.data = data
     else:
-        d = CostingDocument(organization_id=org_id, kind=kind, name=name, data=data)
+        d = CostingDocument(organization_id=org_id, kind=kind, name=name, data=data, production_cycle_id=cycle_id)
         db.add(d)
     return d
 
 
 async def create_costing_doc(db, org_id, req: schemas.CostingDocumentCreate) -> schemas.CostingDocumentOut:
     _validate_doc(req.kind, req.data)
-    exists = (await db.execute(select(CostingDocument.id).where(
-        CostingDocument.organization_id == org_id, CostingDocument.kind == req.kind,
-        CostingDocument.name == req.name))).first()
-    if exists:
-        raise HTTPException(status.HTTP_409_CONFLICT, f"A {req.kind} named '{req.name}' already exists")
-    d = CostingDocument(organization_id=org_id, kind=req.kind, name=req.name, data=req.data)
+    await ensure_writable(db, org_id, req.production_cycle_id)
+    same = select(CostingDocument.id).where(CostingDocument.organization_id == org_id, CostingDocument.kind == req.kind,
+                                            CostingDocument.name == req.name)
+    same = same.where(CostingDocument.production_cycle_id.is_(None) if req.production_cycle_id is None
+                      else CostingDocument.production_cycle_id == req.production_cycle_id)
+    if (await db.execute(same)).first():
+        raise HTTPException(status.HTTP_409_CONFLICT, f"A {req.kind} named '{req.name}' already exists"
+                            + (" in this cycle" if req.production_cycle_id else ""))
+    d = CostingDocument(organization_id=org_id, kind=req.kind, name=req.name, data=req.data,
+                        production_cycle_id=req.production_cycle_id)
     db.add(d)
     await db.commit()
     await db.refresh(d)
     o = schemas.CostingDocumentOut.model_validate(d)
-    o.computed = _compute(d, await _docs_by_kind(db, org_id), await _fodder_costs(db, org_id))
+    o.computed = _compute(d, await _docs_by_kind(db, org_id, d.production_cycle_id), await _fodder_costs(db, org_id))
     return o
 
 
@@ -494,7 +610,7 @@ async def update_costing_doc(db, org_id, doc_id, req: schemas.CostingDocumentUpd
     await db.commit()
     await db.refresh(d)
     o = schemas.CostingDocumentOut.model_validate(d)
-    o.computed = _compute(d, await _docs_by_kind(db, org_id), await _fodder_costs(db, org_id))
+    o.computed = _compute(d, await _docs_by_kind(db, org_id, d.production_cycle_id), await _fodder_costs(db, org_id))
     return o
 
 
@@ -504,19 +620,40 @@ async def delete_costing_doc(db, org_id, doc_id) -> None:
 
 
 # -------------------------------------------------------- performance & profit
-async def _load(db, org_id) -> list[tuple[metrics.AnimalInput, dict]]:
-    rows = (await db.execute(
-        select(FeedlotAnimal, Animal, IntakeBatch)
-        .join(Animal, Animal.id == FeedlotAnimal.animal_id)
-        .join(IntakeBatch, IntakeBatch.id == FeedlotAnimal.intake_batch_id)
-        .where(FeedlotAnimal.organization_id == org_id))).all()
+def _as_uuid(v) -> uuid.UUID | None:
+    try:
+        return v if isinstance(v, uuid.UUID) else (uuid.UUID(str(v)) if v else None)
+    except ValueError:
+        return None
+
+
+async def _load(db, org_id, cycle: CycleSel | None = None, intake_batch_id=None,
+                sale_batch_id=None) -> list[tuple[metrics.AnimalInput, dict]]:
+    """Every feedlot animal with its weights and exit. The optional filters are applied in SQL so a screen for one
+    cycle / batch reads only that cycle's animals and weigh records instead of the whole organisation's; callers
+    still apply the same filters in Python afterwards, so the result is identical either way."""
+    q = (select(FeedlotAnimal, Animal, IntakeBatch)
+         .join(Animal, Animal.id == FeedlotAnimal.animal_id)
+         .join(IntakeBatch, IntakeBatch.id == FeedlotAnimal.intake_batch_id)
+         .where(FeedlotAnimal.organization_id == org_id))
+    if cycle is not None:
+        q = q.where(IntakeBatch.production_cycle_id.is_(None) if cycle.unassigned
+                    else IntakeBatch.production_cycle_id == cycle.id)
+    if _as_uuid(intake_batch_id):
+        q = q.where(FeedlotAnimal.intake_batch_id == _as_uuid(intake_batch_id))
+    if _as_uuid(sale_batch_id):
+        q = q.where(FeedlotAnimal.animal_id.in_(
+            select(FeedlotExit.animal_id).where(FeedlotExit.organization_id == org_id,
+                                                FeedlotExit.sale_batch_id == _as_uuid(sale_batch_id))))
+    rows = (await db.execute(q)).all()
     if not rows:
         return []
     ids = [a.id for _, a, _ in rows]
     weights: dict[uuid.UUID, list[tuple[date, float]]] = defaultdict(list)
     for w in (await db.execute(select(WeightRecord).where(WeightRecord.animal_id.in_(ids)))).scalars():
         weights[w.animal_id].append((w.recorded_at.date(), float(w.weight_kg)))
-    exits = {e.animal_id: e for e in (await db.execute(select(FeedlotExit).where(FeedlotExit.organization_id == org_id))).scalars()}
+    exits = {e.animal_id: e for e in (await db.execute(
+        select(FeedlotExit).where(FeedlotExit.organization_id == org_id, FeedlotExit.animal_id.in_(ids)))).scalars()}
     sbs = {b.id: b for b in (await db.execute(select(SaleBatch).where(SaleBatch.organization_id == org_id))).scalars()}
     out = []
     for fa, animal, ib in rows:
@@ -531,19 +668,29 @@ async def _load(db, org_id) -> list[tuple[metrics.AnimalInput, dict]]:
             exit_amount=float(ex.amount) if ex else 0.0, intake_batch=ib.batch_number,
             sale_batch=sb.batch_number if sb else None, landed_cost=ib.landed_cost_per_head)
         out.append((inp, {"intake_batch_id": str(ib.id), "sale_batch_id": str(sb.id) if sb else None,
-                          "animal_status": animal.status, "ear_tag": animal.ear_tag}))
+                          "animal_status": animal.status, "ear_tag": animal.ear_tag,
+                          "production_cycle_id": str(ib.production_cycle_id) if ib.production_cycle_id else None}))
     return out
 
 
+def _in_cycle(meta: dict, cycle: CycleSel | None) -> bool:
+    if cycle is None:
+        return True
+    c = meta.get("production_cycle_id")
+    return c is None if cycle.unassigned else c == str(cycle.id)
+
+
 async def performance(db, org_id, as_of: date | None = None, intake_batch_id=None, sale_batch_id=None,
-                      state: str | None = None) -> dict:
+                      state: str | None = None, cycle: CycleSel | None = None) -> dict:
     as_of = as_of or date.today()
     s = metrics.get_settings(await _settings_data(db, org_id))
     animals = []
-    for inp, meta in await _load(db, org_id):
+    for inp, meta in await _load(db, org_id, cycle, intake_batch_id, sale_batch_id):
         if intake_batch_id and meta["intake_batch_id"] != str(intake_batch_id):
             continue
         if sale_batch_id and meta["sale_batch_id"] != str(sale_batch_id):
+            continue
+        if not _in_cycle(meta, cycle):
             continue
         p = metrics.animal_performance(inp, as_of, s)
         p.update(meta)
@@ -585,23 +732,55 @@ def _agg(rows: list[dict]) -> dict:
             "effective_price_per_kg": round(tot("revenue") / sum(wts), 2) if wts and tot("revenue") else None}
 
 
-async def profitability(db, org_id, as_of: date | None = None, intake_batch_id=None, sale_batch_id=None) -> dict:
-    as_of = as_of or date.today()
-    s = metrics.get_settings(await _settings_data(db, org_id))
-    by_kind = await _docs_by_kind(db, org_id)
+async def _cost_context(db, org_id, cycle_id: uuid.UUID | None) -> dict:
+    """The ration plan / feed prices / overhead pool in force for a cycle (its own documents, else the
+    organisation-level ones)."""
+    by_kind = await _docs_by_kind(db, org_id, cycle_id)
     plan = by_kind["ration_plan"][0] if by_kind.get("ration_plan") else None
     pool = by_kind["overhead_pool"][0] if by_kind.get("overhead_pool") else None
-    stages = plan.data.get("stages", []) if plan else []
     feed_costs = metrics.resolve_feed_costs(plan.data, {d.name: d.data for d in by_kind.get("enterprise_budget", [])},
-                                            {d.name: d.data for d in by_kind.get("recipe", [])}, await _fodder_costs(db, org_id)) if plan else {}
-    pool_total = metrics.overhead_totals(pool.data)["total"] if pool else 0.0
+                                            {d.name: d.data for d in by_kind.get("recipe", [])},
+                                            await _fodder_costs(db, org_id)) if plan else {}
+    return {"plan": plan, "pool": pool, "stages": plan.data.get("stages", []) if plan else [], "feed_costs": feed_costs,
+            "pool_total": metrics.overhead_totals(pool.data)["total"] if pool else 0.0,
+            "own_pool": bool(pool and cycle_id is not None and pool.production_cycle_id == cycle_id)}
 
+
+async def profitability(db, org_id, as_of: date | None = None, intake_batch_id=None, sale_batch_id=None,
+                        cycle: CycleSel | None = None) -> dict:
+    """Per-animal figures never depend on which cycle you are viewing: filtering is a pure slice, so the cycles
+    add up to the whole. The one deliberate exception: a cycle that defines its OWN costing documents is costed
+    with them, and a cycle with its own overhead pool spreads that pool over its own bull-days only."""
+    as_of = as_of or date.today()
+    s = metrics.get_settings(await _settings_data(db, org_id))
     loaded = await _load(db, org_id)
     perfs = [(inp, metrics.animal_performance(inp, as_of, s), meta) for inp, meta in loaded]
-    bull_days = sum(p["days_on_farm"] for _, p, _ in perfs)
-    rate = (pool_total / bull_days) if bull_days else 0.0
-    if pool and pool.data.get("rate_mode") == "fixed" and pool.data.get("fixed_rate"):
-        rate = metrics._f(pool.data["fixed_rate"])
+
+    def cid(meta):
+        return uuid.UUID(meta["production_cycle_id"]) if meta.get("production_cycle_id") else None
+
+    ctxs: dict[uuid.UUID | None, dict] = {None: await _cost_context(db, org_id, None)}
+    for _, _, meta in perfs:
+        if cid(meta) not in ctxs:
+            ctxs[cid(meta)] = await _cost_context(db, org_id, cid(meta))
+
+    def pool_group(meta):                 # which overhead pool / bull-day base this animal shares
+        return cid(meta) if ctxs[cid(meta)]["own_pool"] else None
+    bull_days: dict[uuid.UUID | None, float] = defaultdict(float)
+    for _, p, meta in perfs:
+        bull_days[pool_group(meta)] += p["days_on_farm"]
+    rates: dict[uuid.UUID | None, float] = {}
+    for g, days in bull_days.items():
+        pool = ctxs[g]["pool"]
+        rate = (ctxs[g]["pool_total"] / days) if days else 0.0
+        if pool and pool.data.get("rate_mode") == "fixed" and pool.data.get("fixed_rate"):
+            rate = metrics._f(pool.data["fixed_rate"])
+        rates[g] = rate
+    shown = ctxs.get(uuid.UUID(str(cycle.id)) if cycle is not None and not cycle.unassigned else None, ctxs[None])
+    plan, pool, feed_costs, pool_total = shown["plan"], shown["pool"], shown["feed_costs"], shown["pool_total"]
+    shown_group = (cycle.id if cycle is not None and not cycle.unassigned and shown["own_pool"] else None)
+    rate = rates.get(shown_group, 0.0)
+    total_bull_days = bull_days.get(shown_group, 0.0)
     sb_price = {}
     for sb in (await db.execute(select(SaleBatch).where(SaleBatch.organization_id == org_id).order_by(SaleBatch.sold_on))).scalars():
         if sb.price_per_kg:
@@ -614,8 +793,11 @@ async def profitability(db, org_id, as_of: date | None = None, intake_batch_id=N
             continue
         if sale_batch_id and meta["sale_batch_id"] != str(sale_batch_id):
             continue
-        feed = metrics.standard_feed_cost(stages, feed_costs, p["days_on_farm"])
-        ops = round(p["days_on_farm"] * rate, 2)
+        if not _in_cycle(meta, cycle):
+            continue
+        ctx = ctxs[cid(meta)]
+        feed = metrics.standard_feed_cost(ctx["stages"], ctx["feed_costs"], p["days_on_farm"])
+        ops = round(p["days_on_farm"] * rates.get(pool_group(meta), 0.0), 2)
         row = {**p, **meta, **metrics.animal_profit(p, inp, feed, ops, s, ref_price)}
         animals.append(row)
 
@@ -640,7 +822,7 @@ async def profitability(db, org_id, as_of: date | None = None, intake_batch_id=N
     return {"as_of": as_of.isoformat(),
             "assumptions": {"ration_plan": plan.name if plan else None, "feed_costs_per_kg": feed_costs,
                             "overhead_pool": pool.name if pool else None, "overhead_pool_total": pool_total,
-                            "total_bull_days": bull_days, "overhead_rate_per_bull_day": round(rate, 2),
+                            "total_bull_days": total_bull_days, "overhead_rate_per_bull_day": round(rate, 2),
                             "overhead_method": "pool / actual bull-days (fully allocated, never over- or under-charged)",
                             "reference_price_per_kg": ref_price or s["reference_price_per_kg"]},
             "totals": {**_agg(realised), "head_realised": len(realised), "head_open": len(animals) - len(realised),

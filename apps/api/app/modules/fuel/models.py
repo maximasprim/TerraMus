@@ -12,6 +12,7 @@ class FuelLog(Base, UUIDPKMixin):
     __tablename__ = "fuel_logs"
     __table_args__ = (CheckConstraint("litres > 0 and cost >= 0", name="valid_amounts"),)
     organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), index=True)
+    production_cycle_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("production_cycles.id"), nullable=True, index=True)
     asset_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("assets.id"), index=True)
     farm_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("farms.id"), nullable=True)
     log_date: Mapped[date] = mapped_column(Date, index=True)

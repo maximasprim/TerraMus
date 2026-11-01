@@ -81,6 +81,7 @@ export default function ReportsPage() {
               <StatCard label="Paid orders" value={String(data.sales.total_orders)} hint={`${kes(toNumber(data.sales.total_revenue))} revenue`} />
               {!!data.sales.feedlot_head && <StatCard label="Feedlot sales" value={String(data.sales.feedlot_head)} hint={`${kes(toNumber(data.sales.feedlot_revenue ?? "0"))} revenue, sold outside the web shop`} />}
               {!!data.sales.feedlot_purchase_head && <StatCard label="Feedlot purchases" value={String(data.sales.feedlot_purchase_head)} hint={`${kes(toNumber(data.sales.feedlot_purchases ?? "0"))} spent buying bulls`} />}
+              {!!data.sales.crop_sales && <StatCard label="Crop sales (direct)" value={String(data.sales.crop_sales)} hint={`${kes(toNumber(data.sales.crop_sales_revenue ?? "0"))} revenue, sold off the web shop`} />}
               {livestock && <StatCard label="Active herd" value={String(data.herd.active)} hint={`${data.herd.total} animals on record`} />}
               {livestock && <StatCard label="Milk / day" value={liters(toNumber(data.dairy.average_per_day))} hint="30-day average" />}
               {crops && <StatCard label="Active plantings" value={String(data.crops.active)} hint={`${data.crops.total} on record`} />}

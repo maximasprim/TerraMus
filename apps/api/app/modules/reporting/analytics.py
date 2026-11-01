@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.timeseries import key_of, month_keys, month_start
 from app.modules.commerce.models import Order
-from app.modules.crops.models import INACTIVE_PLANTING_STATUSES, CropPlanting, HarvestRecord
+from app.modules.crops.models import INACTIVE_PLANTING_STATUSES, CropPlanting, CropSale, HarvestRecord
 from app.modules.dairy.models import MilkProductionRecord
 from app.modules.feedlot.models import FeedlotAnimal, FeedlotExit
 from app.modules.finance.models import FinanceTransaction
@@ -29,6 +29,8 @@ from app.modules.inventory.models import InventoryItem, StockMovement
 from app.modules.livestock.models import INACTIVE_STATUSES, Animal
 from app.modules.payments.models import Payment
 from app.modules.reporting import analytics_schemas as s
+from app.modules.cycles import resolve as cyc_resolve
+from app.modules.cycles.deps import CycleSel, cond as _ccond
 
 # Same set of order statuses the profitability report treats as "a real sale".
 REVENUE_ORDER_STATUSES = ("paid", "processing", "ready_for_fulfillment", "dispatched", "delivered", "completed")
@@ -77,7 +79,7 @@ def _ranked(mapping: dict[str, Decimal]) -> list[s.LabelAmount]:
 
 # --- sections ---------------------------------------------------------------
 
-async def _finance(db, org_id, keys: list[str], start: date, end: date) -> s.FinanceAnalytics:
+async def _finance(db, org_id, keys: list[str], start: date, end: date, cycle: CycleSel | None = None) -> s.FinanceAnalytics:
     year = func.extract("year", FinanceTransaction.transaction_date)
     month = func.extract("month", FinanceTransaction.transaction_date)
     rows = (await db.execute(
@@ -87,6 +89,7 @@ async def _finance(db, org_id, keys: list[str], start: date, end: date) -> s.Fin
             FinanceTransaction.transaction_date >= start,
             FinanceTransaction.transaction_date <= end,
         )
+        .where(*([] if cycle is None else [cyc_resolve.ledger_cond(cycle)]))
         .group_by(year, month, FinanceTransaction.transaction_type, FinanceTransaction.category)
     )).all()
 
@@ -111,7 +114,7 @@ async def _finance(db, org_id, keys: list[str], start: date, end: date) -> s.Fin
     )
 
 
-async def _sales(db, org_id, tz: str, keys: list[str], start: date, end: date) -> s.SalesAnalytics:
+async def _sales(db, org_id, tz: str, keys: list[str], start: date, end: date, cycle: CycleSel | None = None) -> s.SalesAnalytics:
     lo, hi = _local_bounds(start, end)
     local_created = func.timezone(tz, Order.created_at)
     year, month = _local_ym(Order.created_at, tz)
@@ -149,7 +152,8 @@ async def _sales(db, org_id, tz: str, keys: list[str], start: date, end: date) -
     fl_rows = (await db.execute(
         select(fl_year, fl_month, func.count(FeedlotExit.id), func.coalesce(func.sum(FeedlotExit.amount), 0))
         .where(FeedlotExit.organization_id == org_id, FeedlotExit.exit_type == "sold", FeedlotExit.amount > 0,
-               FeedlotExit.exit_date >= start, FeedlotExit.exit_date <= end)
+               FeedlotExit.exit_date >= start, FeedlotExit.exit_date <= end,
+               *([] if cycle is None else [_ccond(cyc_resolve.exit_cycle(FeedlotExit.id), cycle)]))
         .group_by(fl_year, fl_month)
     )).all()
     for y, m, count, total in fl_rows:
@@ -169,7 +173,8 @@ async def _sales(db, org_id, tz: str, keys: list[str], start: date, end: date) -
         select(fp_year, fp_month, func.count(FeedlotAnimal.id), func.coalesce(func.sum(Animal.acquisition_cost), 0))
         .join(Animal, Animal.id == FeedlotAnimal.animal_id)
         .where(FeedlotAnimal.organization_id == org_id, Animal.acquisition_cost > 0,
-               FeedlotAnimal.received_on >= start, FeedlotAnimal.received_on <= end)
+               FeedlotAnimal.received_on >= start, FeedlotAnimal.received_on <= end,
+               *([] if cycle is None else [_ccond(cyc_resolve.animal_cycle(FeedlotAnimal.animal_id), cycle)]))
         .group_by(fp_year, fp_month)
     )).all()
     for y, m, count, total in fp_rows:
@@ -179,14 +184,34 @@ async def _sales(db, org_id, tz: str, keys: list[str], start: date, end: date) -
             fp_cost[k] += Decimal(total)
     purchase_head, purchase_cost = sum(fp_head.values()), sum(fp_cost.values(), ZERO)
 
+    # Crop produce sold off the web shop (voided entries were corrections and don't count).
+    cs_count = {k: 0 for k in keys}
+    cs_revenue = {k: ZERO for k in keys}
+    cs_year = func.extract("year", CropSale.sale_date)
+    cs_month = func.extract("month", CropSale.sale_date)
+    cs_rows = (await db.execute(
+        select(cs_year, cs_month, func.count(CropSale.id), func.coalesce(func.sum(CropSale.amount), 0))
+        .where(CropSale.organization_id == org_id, CropSale.voided_at.is_(None),
+               CropSale.sale_date >= start, CropSale.sale_date <= end)
+        .group_by(cs_year, cs_month)
+    )).all()
+    for y, m, count, total in cs_rows:
+        k = key_of(y, m)
+        if k in cs_count:
+            cs_count[k] += count
+            cs_revenue[k] += Decimal(total)
+    crop_count, crop_revenue = sum(cs_count.values()), sum(cs_revenue.values(), ZERO)
+
     total_orders, total_revenue = sum(orders.values()), sum(revenue.values(), ZERO)
     return s.SalesAnalytics(
         monthly=[s.MonthlySales(month=k, orders=orders[k], revenue=_money(revenue[k]),
                                 feedlot_head=fl_head[k], feedlot_revenue=_money(fl_revenue[k]),
-                                feedlot_purchase_head=fp_head[k], feedlot_purchases=_money(fp_cost[k])) for k in keys],
+                                feedlot_purchase_head=fp_head[k], feedlot_purchases=_money(fp_cost[k]),
+                                crop_sales=cs_count[k], crop_sales_revenue=_money(cs_revenue[k])) for k in keys],
         feedlot_head=feedlot_head, feedlot_revenue=_money(feedlot_revenue),
-        combined_revenue=_money(total_revenue + feedlot_revenue),
+        combined_revenue=_money(total_revenue + feedlot_revenue + crop_revenue),
         feedlot_purchase_head=purchase_head, feedlot_purchases=_money(purchase_cost),
+        crop_sales=crop_count, crop_sales_revenue=_money(crop_revenue),
         orders_by_status=[s.LabelCount(key=k, count=c) for k, c in status_rows],
         payments_by_provider=[s.ProviderTotal(key=p, amount=_money(a), count=c) for p, a, c in provider_rows],
         total_orders=total_orders, total_revenue=_money(total_revenue),
@@ -194,14 +219,15 @@ async def _sales(db, org_id, tz: str, keys: list[str], start: date, end: date) -
     )
 
 
-async def _herd(db, org_id) -> s.HerdAnalytics:
+async def _herd(db, org_id, cycle: CycleSel | None = None) -> s.HerdAnalytics:
+    scope = [] if cycle is None else [Animal.id.in_(cyc_resolve.animal_ids_in(org_id, cycle))]
     status_rows = (await db.execute(
-        select(Animal.status, func.count(Animal.id)).where(Animal.organization_id == org_id)
+        select(Animal.status, func.count(Animal.id)).where(Animal.organization_id == org_id, *scope)
         .group_by(Animal.status).order_by(func.count(Animal.id).desc())
     )).all()
     species_rows = (await db.execute(
         select(Animal.species, func.count(Animal.id))
-        .where(Animal.organization_id == org_id, Animal.status.not_in(INACTIVE_STATUSES))
+        .where(Animal.organization_id == org_id, Animal.status.not_in(INACTIVE_STATUSES), *scope)
         .group_by(Animal.species).order_by(func.count(Animal.id).desc())
     )).all()
     total = sum(c for _, c in status_rows)
@@ -234,21 +260,22 @@ async def _dairy(db, org_id, today: date) -> s.DairyAnalytics:
     )
 
 
-async def _crops(db, org_id, tz: str, keys: list[str], start: date, end: date) -> s.CropAnalytics:
+async def _crops(db, org_id, tz: str, keys: list[str], start: date, end: date, cycle: CycleSel | None = None) -> s.CropAnalytics:
+    cscope = [] if cycle is None else [_ccond(CropPlanting.production_cycle_id, cycle)]
     status_rows = (await db.execute(
-        select(CropPlanting.status, func.count(CropPlanting.id)).where(CropPlanting.organization_id == org_id)
+        select(CropPlanting.status, func.count(CropPlanting.id)).where(CropPlanting.organization_id == org_id, *cscope)
         .group_by(CropPlanting.status).order_by(func.count(CropPlanting.id).desc())
     )).all()
     type_rows = (await db.execute(
         select(CropPlanting.crop_type, func.count(CropPlanting.id), func.coalesce(func.sum(CropPlanting.area_size), 0))
-        .where(CropPlanting.organization_id == org_id, CropPlanting.status.not_in(INACTIVE_PLANTING_STATUSES))
+        .where(CropPlanting.organization_id == org_id, CropPlanting.status.not_in(INACTIVE_PLANTING_STATUSES), *cscope)
         .group_by(CropPlanting.crop_type).order_by(func.count(CropPlanting.id).desc())
     )).all()
 
     # HarvestRecord has no organization_id of its own - scope it through its planting.
     lo, hi = _local_bounds(start, end)
     local_harvested = func.timezone(tz, HarvestRecord.harvested_at)
-    in_window = (CropPlanting.organization_id == org_id, local_harvested >= lo, local_harvested < hi)
+    in_window = (CropPlanting.organization_id == org_id, local_harvested >= lo, local_harvested < hi, *cscope)
     unit_rows = (await db.execute(
         select(HarvestRecord.unit, func.sum(HarvestRecord.quantity), func.count(HarvestRecord.id))
         .join(CropPlanting, CropPlanting.id == HarvestRecord.planting_id).where(*in_window)
@@ -326,17 +353,17 @@ async def _health(db, org_id, tz: str, keys: list[str], start: date, end: date) 
 
 # --- entry point ------------------------------------------------------------
 
-async def analytics_report(db: AsyncSession, org_id: uuid.UUID, months: int) -> s.AnalyticsReport:
+async def analytics_report(db: AsyncSession, org_id: uuid.UUID, months: int, cycle: CycleSel | None = None) -> s.AnalyticsReport:
     tz, today = await resolve_timezone(db, org_id)
     keys = month_keys(today, months)
     start = month_start(keys[0])
     return s.AnalyticsReport(
         start_date=start, end_date=today, months=months, timezone=tz,
-        finance=await _finance(db, org_id, keys, start, today),
-        sales=await _sales(db, org_id, tz, keys, start, today),
-        herd=await _herd(db, org_id),
+        finance=await _finance(db, org_id, keys, start, today, cycle),
+        sales=await _sales(db, org_id, tz, keys, start, today, cycle),
+        herd=await _herd(db, org_id, cycle),
         dairy=await _dairy(db, org_id, today),
-        crops=await _crops(db, org_id, tz, keys, start, today),
+        crops=await _crops(db, org_id, tz, keys, start, today, cycle),
         inventory=await _inventory(db, org_id),
         health=await _health(db, org_id, tz, keys, start, today),
     )

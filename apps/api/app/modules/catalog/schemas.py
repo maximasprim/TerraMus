@@ -2,6 +2,7 @@ import uuid
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
+from app.modules.catalog.menus import HIDEABLE_KEYS, MENUS, PROTECTED
 from app.modules.crops.catalog import CROP_TYPE_CODES
 from app.modules.livestock.catalog import SPECIES_CODES
 
@@ -28,6 +29,19 @@ class TenantCatalogSettingsOut(BaseModel):
     crops_enabled: bool
     enabled_species: list[str] | None
     enabled_crop_types: list[str] | None
+    hidden_menus: list[str] | None = None
+
+
+class MenuEntryOut(BaseModel):
+    """One sidebar entry a platform admin can hide for a tenant."""
+    key: str
+    label: str
+    group: str
+    hideable: bool
+
+
+def menu_entries() -> list[MenuEntryOut]:
+    return [MenuEntryOut(key=k, label=label, group=group, hideable=k not in PROTECTED) for k, label, group in MENUS]
 
 
 class TenantCatalogSettingsUpdate(BaseModel):
@@ -42,6 +56,8 @@ class TenantCatalogSettingsUpdate(BaseModel):
     enabled_crop_types: list[str] | None = None
     clear_species_restriction: bool = False
     clear_crop_type_restriction: bool = False
+    # Sidebar entries to hide for this tenant. Omitted = unchanged; [] = show everything again.
+    hidden_menus: list[str] | None = None
 
     # An unknown code used to be stored as-is, so a typo silently locked the
     # tenant out of a species/crop type. Reject it, and drop duplicates.
@@ -54,6 +70,16 @@ class TenantCatalogSettingsUpdate(BaseModel):
     @classmethod
     def _known_crop_types(cls, v: list[str] | None) -> list[str] | None:
         return _known_codes(v, CROP_TYPE_CODES, "crop types")
+
+    @field_validator("hidden_menus")
+    @classmethod
+    def _known_menus(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return None
+        unknown = sorted({m for m in v if m not in HIDEABLE_KEYS})
+        if unknown:
+            raise ValueError(f"Unknown or always-visible menus: {', '.join(unknown)}")
+        return list(dict.fromkeys(v))
 
     @model_validator(mode="after")
     def _no_conflicting_instructions(self):
@@ -83,3 +109,4 @@ class EffectiveCatalogOut(BaseModel):
     crops_enabled: bool
     species: list[SpeciesCatalogEntryOut]
     crop_types: list[CropTypeCatalogEntryOut]
+    hidden_menus: list[str] = []

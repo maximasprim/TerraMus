@@ -12,7 +12,7 @@ from app.modules.livestock.models import Animal
 from app.modules.livestock.service import get_animal
 from app.modules.livestock import schemas as livestock_schemas
 from app.modules.livestock.service import change_status as change_animal_status
-from app.modules.crops.models import CropPlanting, HarvestRecord
+from app.modules.crops.models import CropPlanting, CropSale, HarvestRecord
 from app.modules.crops.service import get_planting as get_crop_planting
 from app.modules.customers.service import get_customer
 from app.modules.commerce.models import Listing, Reservation, Order, OrderItem, OrderStatusEvent
@@ -102,7 +102,8 @@ async def _lock_crop_planting_for_update(db: AsyncSession, org_id: uuid.UUID, pl
 
 async def get_available_crop_quantity(db: AsyncSession, org_id: uuid.UUID, planting_id: uuid.UUID) -> Decimal:
     """Available stock = everything harvested so far, minus everything
-    already committed to a non-cancelled/non-failed/non-refunded order. This
+    already committed to a non-cancelled/non-failed/non-refunded order, and everything sold directly
+    off the web (crop_sales). This
     is a ledger, not a stored counter - matching the append-only philosophy
     used everywhere else in this codebase (harvest_records, order_status_events):
     the truth is always derivable from history, nothing is silently
@@ -122,7 +123,14 @@ async def get_available_crop_quantity(db: AsyncSession, org_id: uuid.UUID, plant
         )
     )
     committed = Decimal(committed_result.scalar_one())
-    return harvested - committed
+
+    # Produce sold OFF the web shop (crop_sales) is gone too, so the shop must not offer it again. Voided
+    # entries were corrections and don't count. With no direct sales this term is 0 and nothing changes.
+    sold_direct = Decimal((await db.execute(
+        select(func.coalesce(func.sum(CropSale.quantity), 0)).where(
+            CropSale.planting_id == planting_id, CropSale.organization_id == org_id, CropSale.voided_at.is_(None))
+    )).scalar_one())
+    return max(harvested - committed - sold_direct, Decimal("0"))   # never advertise negative stock
 
 
 async def list_low_stock_crop_listings(db: AsyncSession, org_id: uuid.UUID) -> list[dict]:

@@ -13,6 +13,7 @@ from app.modules.procurement.models import (
 from app.modules.procurement import schemas
 from app.modules.inventory import schemas as inventory_schemas
 from app.modules.inventory.service import record_movement as record_stock_movement
+from app.modules.cycles.deps import CycleSel, apply_col, ensure_writable
 
 # Spec §26: REQUEST -> APPROVAL -> PURCHASE ORDER -> RECEIVED -> INVOICED -> PAID.
 # Same shape as commerce._ORDER_TRANSITIONS / livestock._ALLOWED_TRANSITIONS:
@@ -110,7 +111,7 @@ def _to_out(po: PurchaseOrder) -> schemas.PurchaseOrderOut:
         id=po.id, organization_id=po.organization_id, supplier_id=po.supplier_id,
         po_number=po.po_number, status=po.status, order_date=po.order_date,
         expected_delivery_date=po.expected_delivery_date, notes=po.notes,
-        requested_by=po.requested_by, approved_by=po.approved_by,
+        requested_by=po.requested_by, approved_by=po.approved_by, production_cycle_id=po.production_cycle_id,
         total_amount=_total(po.items), items=list(po.items), created_at=po.created_at,
     )
 
@@ -119,12 +120,13 @@ async def create_purchase_order(
     db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, req: schemas.PurchaseOrderCreate,
 ) -> schemas.PurchaseOrderOut:
     await get_supplier(db, org_id, req.supplier_id)  # 404s if it doesn't belong to this org
+    await ensure_writable(db, org_id, req.production_cycle_id)
 
     po_number = await _next_po_number(db, org_id)
     po = PurchaseOrder(
         organization_id=org_id, supplier_id=req.supplier_id, po_number=po_number,
         status="requested", expected_delivery_date=req.expected_delivery_date,
-        notes=req.notes, requested_by=user_id,
+        notes=req.notes, requested_by=user_id, production_cycle_id=req.production_cycle_id,
     )
     db.add(po)
     await db.flush()
@@ -165,8 +167,9 @@ async def get_purchase_order_detail(db: AsyncSession, org_id: uuid.UUID, po_id: 
 
 async def list_purchase_orders(
     db: AsyncSession, org_id: uuid.UUID, status_filter: str | None = None, supplier_id: uuid.UUID | None = None,
+    cycle: CycleSel | None = None,
 ) -> list[schemas.PurchaseOrderOut]:
-    query = select(PurchaseOrder).where(PurchaseOrder.organization_id == org_id)
+    query = apply_col(select(PurchaseOrder).where(PurchaseOrder.organization_id == org_id), PurchaseOrder.production_cycle_id, cycle)
     if status_filter:
         query = query.where(PurchaseOrder.status == status_filter)
     if supplier_id:

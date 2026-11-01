@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AdminShell } from "@/components/admin-shell";
+import { ImageUploadField } from "@/components/image-upload-field";
 import { Card, Button, Input, Textarea, ErrorState, EmptyState } from "@/components/ui";
 import { apiFetch, ApiError } from "@/lib/api";
 import { clsx } from "clsx";
@@ -76,7 +77,7 @@ function ProfileTab() {
         <Input label="Farm name" value={form.farm_name ?? ""} onChange={(e) => setForm((f) => ({ ...f, farm_name: e.target.value }))} />
         <Input label="Tagline" value={form.tagline ?? ""} onChange={(e) => setForm((f) => ({ ...f, tagline: e.target.value }))} />
         <Textarea label="Farm story" value={form.farm_story ?? ""} onChange={(e) => setForm((f) => ({ ...f, farm_story: e.target.value }))} />
-        <Input label="Logo URL" value={form.logo_url ?? ""} onChange={(e) => setForm((f) => ({ ...f, logo_url: e.target.value }))} />
+        <ImageUploadField label="Logo" kind="logo" value={form.logo_url ?? ""} onChange={(url) => setForm((f) => ({ ...f, logo_url: url }))} />
         <div className="grid grid-cols-2 gap-4">
           <Input label="Address" value={form.address ?? ""} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} />
           <Input label="County" value={form.county ?? ""} onChange={(e) => setForm((f) => ({ ...f, county: e.target.value }))} />
@@ -324,6 +325,12 @@ function BannersTab() {
     onError: (err) => setError(err instanceof ApiError ? err.message : "Failed to add banner"),
   });
 
+  const remove = useMutation({
+    mutationFn: (id: string) => apiFetch(`/api/v1/cms/banners/${id}`, { method: "DELETE" }),
+    onSuccess: () => { setError(null); queryClient.invalidateQueries({ queryKey: ["cms-banners"] }); },
+    onError: (err) => setError(err instanceof ApiError ? err.message : "Failed to delete banner"),
+  });
+
   return (
     <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
       <Card>
@@ -331,7 +338,7 @@ function BannersTab() {
         <form onSubmit={(e) => { e.preventDefault(); create.mutate(); }} className="space-y-3">
           {error && <ErrorState message={error} />}
           <Input label="Title" required value={title} onChange={(e) => setTitle(e.target.value)} />
-          <Input label="Image URL" required value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} />
+          <ImageUploadField label="Image" kind="banner" required value={imageUrl} onChange={setImageUrl} />
           <Input label="Link URL (optional)" value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} />
           <Button type="submit" disabled={create.isPending} className="w-full">
             {create.isPending ? "Adding…" : "Add banner"}
@@ -343,9 +350,23 @@ function BannersTab() {
         <div className="space-y-2">
           {data?.map((b) => (
             <Card key={b.id}>
-              <p className="text-sm font-medium text-ink">{b.title}</p>
-              <p className="truncate text-xs text-muted">{b.image_url}</p>
-              {!b.is_active && <p className="mt-1 text-xs text-clay">Inactive</p>}
+              <div className="flex items-start gap-3">
+                {/* eslint-disable-next-line @next/next/no-img-element -- admin preview of the org-supplied image */}
+                <img src={b.image_url} alt="" className="h-14 w-24 shrink-0 rounded bg-hairline/30 object-cover" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-ink">{b.title}</p>
+                  <p className="truncate text-xs text-muted">{b.image_url}</p>
+                  {!b.is_active && <p className="mt-1 text-xs text-clay">Inactive</p>}
+                </div>
+                <Button
+                  variant="ghost"
+                  className="text-xs"
+                  disabled={remove.isPending}
+                  onClick={() => { if (window.confirm(`Delete the banner "${b.title}"? This can't be undone.`)) remove.mutate(b.id); }}
+                >
+                  Delete
+                </Button>
+              </div>
             </Card>
           ))}
         </div>

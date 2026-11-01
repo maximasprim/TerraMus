@@ -8,14 +8,16 @@ from app.core.database import get_db
 from app.modules.groups import schemas, service
 from app.modules.identity.deps import require_permission
 from app.modules.identity.models import User
+from app.modules.cycles.deps import CycleSel, cycle_filter
 
 router = APIRouter(prefix="/api/v1/groups", tags=["groups"])
 
 
 @router.get("")
 async def list_groups(species: str | None = Query(None, pattern="^(poultry|rabbits|fish|pigs|other)$"), state: str | None = Query(None, pattern="^(active|closed)$"),
-                      user: User = Depends(require_permission("groups.read")), db: AsyncSession = Depends(get_db)):
-    return await service.list_groups(db, user.organization_id, species, state)
+                      user: User = Depends(require_permission("groups.read")), db: AsyncSession = Depends(get_db),
+                      cycle: CycleSel | None = Depends(cycle_filter)):
+    return await service.list_groups(db, user.organization_id, species, state, cycle)
 
 
 @router.post("", status_code=201)

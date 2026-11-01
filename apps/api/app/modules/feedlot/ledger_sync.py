@@ -22,7 +22,7 @@ import uuid
 from datetime import date
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,6 +37,10 @@ ACQUISITION_CATEGORY = "livestock_acquisition"
 # Ledger rows of these kinds are produced by the system itself and are never "manual".
 _SYSTEM_REFS = (SALE_REF, "order", "account_payment", ACQUISITION_REF)
 SAMPLE_LIMIT = 25
+# A real catch-up run commits every CHUNK postings (a timeout then costs at most one chunk, and the transaction is
+# never open for minutes) and holds a per-organisation advisory lock so two syncs can never run side by side.
+CHUNK = 25
+_LOCK_NAMESPACE = 7301
 
 
 def sale_is_postable(ex: FeedlotExit) -> bool:
@@ -61,11 +65,13 @@ async def _recorded_acquisition_ids(db: AsyncSession, org_id: uuid.UUID) -> set[
 
 
 async def post_sale(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID | None,
-                    ex: FeedlotExit, animal: Animal) -> str:
-    """Book one feedlot sale. -> 'posted' | 'already_recorded' | 'no_price'. Does not commit."""
+                    ex: FeedlotExit, animal: Animal, recorded: set[uuid.UUID] | None = None) -> str:
+    """Book one feedlot sale. -> 'posted' | 'already_recorded' | 'no_price'. Does not commit.
+    `recorded` (optional) is the set of sale ids already booked: a batch caller passes it once instead of
+    this function re-reading the whole ledger for every sale."""
     if not sale_is_postable(ex):
         return "no_price"
-    if ex.id in await _recorded_sale_ids(db, org_id):
+    if ex.id in (recorded if recorded is not None else await _recorded_sale_ids(db, org_id)):
         return "already_recorded"
     from app.modules.receivables import service as receivables   # cash sale -> income now; credit -> charge on account
     try:
@@ -73,8 +79,24 @@ async def post_sale(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID | No
             await receivables.stage_feedlot_sale(db, org_id, user_id, ex, animal)
             await db.flush()
     except IntegrityError:
+        if recorded is not None:
+            recorded.add(ex.id)
         return "already_recorded"
+    if recorded is not None:
+        recorded.add(ex.id)
     return "posted"
+
+
+async def _lock_or_409(db: AsyncSession, org_id: uuid.UUID, *, resumed: bool = False) -> None:
+    """Take this organisation's sync lock for the current transaction (it is released by commit/rollback)."""
+    got = (await db.execute(text("SELECT pg_try_advisory_xact_lock(:ns, :k)"),
+                            {"ns": _LOCK_NAMESPACE, "k": org_id.int % 2147483647})).scalar()
+    if not got:
+        raise HTTPException(status.HTTP_409_CONFLICT, (
+            "Another Finance sync started while this one was running; stopped here. Everything posted so far is saved. "
+            "Wait for the other sync to finish, then preview again." if resumed else
+            "A Finance sync is already running for this organisation. Wait for it to finish (do not click again), "
+            "then preview again to see what is left."))
 
 
 async def post_acquisition(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID | None,
@@ -116,6 +138,8 @@ async def reconcile(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, *, 
                     include_purchases: bool = True, confirm_overlap: bool = False) -> dict:
     """Catch-up for feedlot sales/purchases that exist but never reached the ledger (e.g. imported
     before the importer posted to Finance). Safe to run repeatedly: only what is missing is posted."""
+    if not dry_run:
+        await _lock_or_409(db, org_id)          # before reading, so a second run fails fast instead of waiting on our rows
     sold = (await db.execute(
         select(FeedlotExit, Animal).join(Animal, Animal.id == FeedlotExit.animal_id)
         .where(FeedlotExit.organization_id == org_id, FeedlotExit.exit_type == "sold")
@@ -180,10 +204,22 @@ async def reconcile(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, *, 
             "with confirm_overlap=true."))
 
     recorded_acq = await _recorded_acquisition_ids(db, org_id) if buy_todo else set()
+    since_commit = 0
+
+    async def checkpoint() -> None:
+        """Commit every CHUNK postings and take the lock again for the next chunk."""
+        nonlocal since_commit
+        since_commit += 1
+        if since_commit >= CHUNK:
+            await db.commit()
+            since_commit = 0
+            await _lock_or_409(db, org_id, resumed=True)
+
     for ex, animal in sale_todo:
-        outcome = await post_sale(db, org_id, user_id, ex, animal)
+        outcome = await post_sale(db, org_id, user_id, ex, animal, sale_done)
         if outcome == "posted":
             sales["posted"] += 1
+            await checkpoint()
         elif outcome == "already_recorded":
             sales["already_recorded"] += 1
             sales["missing"] -= 1
@@ -191,6 +227,7 @@ async def reconcile(db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, *, 
         outcome = await post_acquisition(db, org_id, user_id, animal, fa.received_on, recorded_acq)
         if outcome == "posted":
             buy["posted"] += 1
+            await checkpoint()
         elif outcome == "already_recorded":
             buy["already_recorded"] += 1
             buy["missing"] -= 1

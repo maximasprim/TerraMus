@@ -10,6 +10,7 @@ from app.core.events import publish
 from app.modules.crops.models import CropPlanting, CropEvent, HarvestRecord, INACTIVE_PLANTING_STATUSES
 from app.modules.crops import schemas
 from app.modules.crops.catalog import CROP_TYPE_LOOKUP
+from app.modules.cycles.deps import CycleSel, apply_col
 
 # Allowed status transitions, mirroring livestock/service.py's
 # _ALLOWED_TRANSITIONS. "growing" is the entry state for every new planting.
@@ -187,24 +188,28 @@ def compute_profitability(planting: CropPlanting) -> schemas.CropPlantingProfita
     )
 
 
-async def get_crop_summary(db: AsyncSession, org_id: uuid.UUID) -> dict:
+async def get_crop_summary(db: AsyncSession, org_id: uuid.UUID, cycle: CycleSel | None = None) -> dict:
     """Backs dashboard-style cards, mirroring livestock.service.get_herd_summary."""
-    base = select(func.count(CropPlanting.id)).where(CropPlanting.organization_id == org_id)
+    cyc = CropPlanting.production_cycle_id
+    base = apply_col(select(func.count(CropPlanting.id)).where(CropPlanting.organization_id == org_id), cyc, cycle)
     total = (await db.execute(base)).scalar_one()
     active = (await db.execute(base.where(CropPlanting.status.notin_(INACTIVE_PLANTING_STATUSES)))).scalar_one()
     by_crop_type_rows = await db.execute(
         select(CropPlanting.crop_type, func.count(CropPlanting.id))
-        .where(CropPlanting.organization_id == org_id, CropPlanting.status.notin_(INACTIVE_PLANTING_STATUSES))
+        .where(CropPlanting.organization_id == org_id, CropPlanting.status.notin_(INACTIVE_PLANTING_STATUSES),
+               *([] if cycle is None else [(cyc.is_(None) if cycle.unassigned else cyc == cycle.id)]))
         .group_by(CropPlanting.crop_type)
     )
     total_area_row = await db.execute(
         select(func.coalesce(func.sum(CropPlanting.area_size), 0)).where(
             CropPlanting.organization_id == org_id, CropPlanting.status.notin_(INACTIVE_PLANTING_STATUSES),
+            *([] if cycle is None else [(cyc.is_(None) if cycle.unassigned else cyc == cycle.id)]),
         )
     )
     planting_value_row = await db.execute(
         select(func.coalesce(func.sum(CropPlanting.current_value), 0)).where(
             CropPlanting.organization_id == org_id, CropPlanting.status.notin_(INACTIVE_PLANTING_STATUSES),
+            *([] if cycle is None else [(cyc.is_(None) if cycle.unassigned else cyc == cycle.id)]),
         )
     )
     return {

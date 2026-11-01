@@ -76,13 +76,14 @@ export function IncomeBreakdownCard({ finance, className }: { finance: FinanceAn
 export function SalesRevenueCard({ sales, className }: { sales: SalesAnalytics; className?: string }) {
   const months = sales.monthly.map((m) => m.month);
   return (
-    <ChartCard title="Sales revenue" subtitle="Paid web orders and feedlot sales, per month" empty={sales.total_orders === 0 && !sales.feedlot_head} emptyText="No paid orders or feedlot sales in this period." className={className}>
+    <ChartCard title="Sales revenue" subtitle="Paid web orders, feedlot sales and crop sales made off the web, per month" empty={sales.total_orders === 0 && !sales.feedlot_head && !sales.crop_sales} emptyText="No paid orders or direct sales in this period." className={className}>
       <BarChart
-        ariaLabel="Sales revenue per month" showLegend={!!sales.feedlot_head} stacked
+        ariaLabel="Sales revenue per month" showLegend={!!(sales.feedlot_head || sales.crop_sales)} stacked
         categories={monthLabels(months)} tooltipTitles={monthTitles(months)} format={kes}
         series={[
           { name: "Web orders", color: SEMANTIC.income, values: sales.monthly.map((m) => toNumber(m.revenue)) },
           ...(sales.feedlot_head ? [{ name: "Feedlot sales", color: SEMANTIC.net, values: sales.monthly.map((m) => toNumber(m.feedlot_revenue ?? "0")) }] : []),
+          ...(sales.crop_sales ? [{ name: "Crop sales (direct)", color: "#6F9A7B", values: sales.monthly.map((m) => toNumber(m.crop_sales_revenue ?? "0")) }] : []),
         ]}
       />
     </ChartCard>

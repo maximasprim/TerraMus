@@ -11,7 +11,11 @@ from app.core.database import get_db
 from app.modules.identity.deps import require_permission
 from app.modules.identity.models import User
 from app.modules.livestock.models import Animal
+from app.modules.crops import economics as crop_economics
+from app.modules.crops.economics_schemas import CropEconomicsReport
 from app.modules.reporting import analytics, analytics_schemas, schemas, service
+from app.modules.cycles import resolve as cyc_resolve
+from app.modules.cycles.deps import CycleSel, cycle_filter
 
 router = APIRouter(prefix="/api/v1/reports", tags=["reporting"])
 
@@ -20,8 +24,9 @@ router = APIRouter(prefix="/api/v1/reports", tags=["reporting"])
 async def dashboard(
     user: User = Depends(require_permission("reports.view")),
     db: AsyncSession = Depends(get_db),
+    cycle: CycleSel | None = Depends(cycle_filter),
 ):
-    return await service.dashboard_summary(db, user.organization_id)
+    return await service.dashboard_summary(db, user.organization_id, cycle)
 
 
 @router.get("/analytics", response_model=analytics_schemas.AnalyticsReport)
@@ -29,18 +34,30 @@ async def analytics_report(
     months: int = Query(6, ge=1, le=24, description="How many calendar months to chart, ending with the current one"),
     user: User = Depends(require_permission("reports.view")),
     db: AsyncSession = Depends(get_db),
+    cycle: CycleSel | None = Depends(cycle_filter),
 ):
     """Chart-ready aggregates (finance, sales, herd, dairy, crops, inventory, health)
     for the dashboard and the reports page. Read-only; scoped to the caller's org."""
-    return await analytics.analytics_report(db, user.organization_id, months)
+    return await analytics.analytics_report(db, user.organization_id, months, cycle)
 
 
 @router.get("/profitability", response_model=schemas.ProfitabilityReport)
 async def profitability(
     user: User = Depends(require_permission("reports.view")),
     db: AsyncSession = Depends(get_db),
+    cycle: CycleSel | None = Depends(cycle_filter),
 ):
-    return await service.profitability_report(db, user.organization_id)
+    return await service.profitability_report(db, user.organization_id, cycle)
+
+
+@router.get("/profitability/crops", response_model=CropEconomicsReport)
+async def crops_profitability(
+    user: User = Depends(require_permission("reports.view")),
+    db: AsyncSession = Depends(get_db),
+    cycle: CycleSel | None = Depends(cycle_filter),
+):
+    """Per-planting cost, revenue (web orders + sales made off the web) and profit so far."""
+    return await crop_economics.all_economics(db, user.organization_id, cycle)
 
 
 @router.get("/profitability/animals/{animal_id}", response_model=schemas.AnimalProfitabilityBreakdown)
@@ -60,11 +77,15 @@ async def animal_profitability(
 async def export_livestock_csv(
     user: User = Depends(require_permission("reports.view")),
     db: AsyncSession = Depends(get_db),
+    cycle: CycleSel | None = Depends(cycle_filter),
 ):
     """Spec §44 - CSV export. Excel (.xlsx) export is still deferred - no
     spreadsheet-writing dependency exists in this build yet - but PDF export
     is now available at the sibling `.pdf` endpoint below (this session)."""
-    result = await db.execute(select(Animal).where(Animal.organization_id == user.organization_id))
+    aq = select(Animal).where(Animal.organization_id == user.organization_id)
+    if cycle is not None:
+        aq = aq.where(Animal.id.in_(cyc_resolve.animal_ids_in(user.organization_id, cycle)))
+    result = await db.execute(aq)
     animals = result.scalars().all()
 
     buffer = io.StringIO()
@@ -91,13 +112,14 @@ async def export_livestock_csv(
 async def export_livestock_pdf(
     user: User = Depends(require_permission("reports.view")),
     db: AsyncSession = Depends(get_db),
+    cycle: CycleSel | None = Depends(cycle_filter),
 ):
     """Spec §44 PDF export, added this session - see
     docs/architecture.md for the reportlab dependency's verification-status
     caveat (written/reviewed, not run - same as finance/pdf.py)."""
     from fastapi.responses import Response
     from app.modules.identity.models import Organization
-    pdf_bytes = await service.render_livestock_report_pdf(db, user.organization_id)
+    pdf_bytes = await service.render_livestock_report_pdf(db, user.organization_id, cycle)
     return Response(
         content=pdf_bytes, media_type="application/pdf",
         headers={"Content-Disposition": "attachment; filename=livestock_report.pdf"},

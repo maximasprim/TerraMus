@@ -1,12 +1,13 @@
 import uuid
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi.responses import RedirectResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.modules.identity.deps import require_permission
 from app.modules.identity.models import User
-from app.modules.cms import schemas, service
+from app.modules.cms import schemas, service, site_images
 
 router = APIRouter(prefix="/api/v1/cms", tags=["cms"])
 
@@ -113,3 +114,39 @@ async def create_banner(
     db: AsyncSession = Depends(get_db),
 ):
     return await service.create_banner(db, user.organization_id, req)
+
+
+@router.delete("/banners/{banner_id}", status_code=204)
+async def delete_banner(
+    banner_id: uuid.UUID,
+    user: User = Depends(require_permission("cms.manage")),
+    db: AsyncSession = Depends(get_db),
+):
+    await service.delete_banner(db, user.organization_id, banner_id)
+    return Response(status_code=204)
+
+
+@router.post("/images", response_model=schemas.SiteImageOut, status_code=201)
+async def upload_site_image(
+    kind: str = Query("banner", pattern="^(logo|banner)$"),
+    file: UploadFile = File(...),
+    user: User = Depends(require_permission("cms.manage")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload a logo or banner image from the device; put the resulting URL in the profile's `logo_url` or a
+    banner's `image_url`. (See the frontend's ImageUploadField.)"""
+    return await site_images.upload_site_image(db, user.organization_id, kind, file)
+
+
+# Public, unauthenticated image bytes keyed only by the image's unguessable UUID - the same arrangement (and the
+# same prefix) as commerce's listing photos, so a plain <img> works on the public storefront.
+media_router = APIRouter(prefix="/api/v1/media", tags=["media"])
+
+
+@media_router.get("/site-images/{image_id}")
+async def site_image(image_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    source = await site_images.get_image_source(db, image_id)
+    if source.redirect_url:
+        return RedirectResponse(source.redirect_url, status_code=302, headers={"Cache-Control": "public, max-age=86400"})
+    return Response(content=source.data, media_type=source.content_type,
+                    headers={"Cache-Control": "public, max-age=31536000, immutable"})

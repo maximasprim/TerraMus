@@ -46,12 +46,15 @@ PERMISSIONS: list[tuple[str, str]] = [
     ("fodder.read", "View fodder plots, production, stock, costs and reports"),
     ("fodder.record", "Record fodder harvests, costs, issues, losses and stock counts"),
     ("fodder.manage", "Manage fodder products, prices, plots, cycles, investments, purchases and sales"),
+    ("cycles.read", "View production cycles and filter reports by cycle"),
+    ("cycles.manage", "Create, edit, close and reopen production cycles; assign records to a cycle"),
 ]
 
 # Default role -> permission grants used by org bootstrap/seed data (spec §5, §61).
 DEFAULT_ROLE_GRANTS: dict[str, list[str]] = {
     "Farm Owner": [code for code, _ in PERMISSIONS],  # full access within the org
     "Farm Manager": [
+        "cycles.read", "cycles.manage",
         "fodder.read", "fodder.record", "fodder.manage",
         "training.read", "training.manage", "groups.read", "groups.record", "groups.manage",
         "feedlot.read", "feedlot.weigh", "feedlot.manage",
@@ -63,6 +66,7 @@ DEFAULT_ROLE_GRANTS: dict[str, list[str]] = {
         "employees.manage", "assets.manage", "search.use",
     ],
     "Livestock Manager": [
+        "cycles.read",
         "fodder.read", "fodder.record",
         "groups.read", "groups.record", "groups.manage",
         "feedlot.read", "feedlot.weigh", "feedlot.manage",
@@ -74,27 +78,32 @@ DEFAULT_ROLE_GRANTS: dict[str, list[str]] = {
         "livestock.read", "listings.manage", "orders.manage",
     ],
     "Veterinarian": [
+        "cycles.read",
         "fodder.read",
         "groups.read",
         "feedlot.read",
         "livestock.read", "health.read", "health.create", "breeding.read", "reports.view", "search.use",
     ],
     "Farm Worker": [
+        "cycles.read",
         "fodder.read", "fodder.record",
         "groups.read", "groups.record",
         "feedlot.read", "feedlot.weigh",
         "livestock.read", "health.create", "dairy.create", "crops.read", "crops.harvest", "search.use",
     ],
     "Inventory Manager": [
+        "cycles.read",
         "inventory.read", "inventory.adjust", "procurement.manage", "reports.view", "assets.manage", "search.use",
     ],
     "Accountant": [
+        "cycles.read",
         "fodder.read",
         "training.read", "groups.read",
         "feedlot.read",
         "finance.read", "finance.create", "payments.manage", "reports.view", "search.use",
     ],
     "Sales Manager": [
+        "cycles.read",
         "fodder.read",
         "training.read", "training.manage",
         "feedlot.read",

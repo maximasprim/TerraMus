@@ -22,6 +22,7 @@ from app.modules.commerce import models as commerce_models  # noqa: F401
 from app.modules.inquiries import models as inquiries_models  # noqa: F401
 from app.modules.payments import models as payments_models  # noqa: F401
 from app.modules.finance import models as finance_models  # noqa: F401
+from app.modules.cycles import models as cycles_models  # noqa: F401
 from app.modules.notifications import models as notifications_models  # noqa: F401
 from app.modules.cms import models as cms_models  # noqa: F401
 from app.modules.billing import models as billing_models  # noqa: F401

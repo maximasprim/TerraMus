@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.events import publish
 from app.modules.inventory.models import InventoryItem, StockMovement, IN_TYPES, OUT_TYPES
 from app.modules.inventory import schemas
+from app.modules.cycles import resolve as cyc_resolve
+from app.modules.cycles.deps import CycleSel
 
 
 async def create_item(db: AsyncSession, org_id: uuid.UUID, req: schemas.InventoryItemCreate) -> InventoryItem:
@@ -212,7 +214,7 @@ async def record_movement(
         movement_type=req.movement_type, quantity=signed_qty,
         unit_cost=effective_unit_cost, batch_number=req.batch_number, expiry_date=req.expiry_date,
         animal_id=req.animal_id, reference=req.reference, notes=req.notes,
-        performed_by=user_id, moved_at=moved_at,
+        performed_by=user_id, moved_at=moved_at, production_cycle_id=req.production_cycle_id,
     )
     db.add(movement)
     await db.commit()
@@ -246,13 +248,13 @@ async def record_movement(
     return movement
 
 
-async def list_movements(db: AsyncSession, org_id: uuid.UUID, item_id: uuid.UUID) -> list[StockMovement]:
+async def list_movements(db: AsyncSession, org_id: uuid.UUID, item_id: uuid.UUID,
+                         cycle: CycleSel | None = None) -> list[StockMovement]:
     await get_item(db, org_id, item_id)
-    result = await db.execute(
-        select(StockMovement)
-        .where(StockMovement.organization_id == org_id, StockMovement.item_id == item_id)
-        .order_by(StockMovement.moved_at.desc())
-    )
+    q = select(StockMovement).where(StockMovement.organization_id == org_id, StockMovement.item_id == item_id)
+    if cycle is not None:      # tagged to the cycle, or issued to an animal that is in it
+        q = q.where(cyc_resolve.stock_cond(cycle))
+    result = await db.execute(q.order_by(StockMovement.moved_at.desc()))
     return list(result.scalars().all())
 
 

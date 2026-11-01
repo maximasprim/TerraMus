@@ -23,6 +23,7 @@ export interface SectionPermission {
 export const SECTION_PERMISSIONS: SectionPermission[] = [
   { prefix: "/admin/dashboard", permission: "reports.view" },
   { prefix: "/admin/livestock", permission: "livestock.read" },
+  { prefix: "/admin/cycles", permission: "cycles.read" },
   { prefix: "/admin/feedlot", permission: "feedlot.read" },
   { prefix: "/admin/groups", permission: "groups.read" },
   { prefix: "/admin/fodder", permission: "fodder.read" },

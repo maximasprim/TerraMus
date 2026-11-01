@@ -10,6 +10,8 @@ from app.modules.identity.models import User
 from app.modules.farm.models import Farm, Location
 from app.modules.livestock import schemas, service
 from app.modules.livestock.models import Animal, INACTIVE_STATUSES
+from app.modules.cycles import resolve as cyc_resolve
+from app.modules.cycles.deps import CycleSel, cycle_filter
 
 router = APIRouter(prefix="/api/v1/livestock", tags=["livestock"])
 
@@ -42,8 +44,11 @@ async def list_animals(
     active_only: bool = Query(False, description="Exclude sold/transferred/deceased/archived animals"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
+    cycle: CycleSel | None = Depends(cycle_filter),
 ):
     query = select(Animal).where(Animal.organization_id == user.organization_id)
+    if cycle is not None:      # animals of a production cycle = animals in that cycle's intake batches
+        query = query.where(Animal.id.in_(cyc_resolve.animal_ids_in(user.organization_id, cycle)))
     if species:
         query = query.where(Animal.species == species)
     if status_filter:
@@ -189,6 +194,7 @@ async def get_profitability(
 async def herd_summary(
     user: User = Depends(require_permission("reports.view")),
     db: AsyncSession = Depends(get_db),
+    cycle: CycleSel | None = Depends(cycle_filter),
 ):
     """Backs the dashboard 'Total Herd' style cards (spec §24/§68) - Phase 2 slice."""
-    return await service.get_herd_summary(db, user.organization_id)
+    return await service.get_herd_summary(db, user.organization_id, cycle)

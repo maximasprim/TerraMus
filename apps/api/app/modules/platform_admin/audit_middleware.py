@@ -42,6 +42,7 @@ _ID = r"[0-9a-fA-F-]{36}"
 # entry is (HTTP method, regex for the path AFTER /organizations/{org_id}).
 _SELF_AUDITED = (
     ("PATCH", re.compile(r"^/status$")),                                   # org suspend / reactivate
+    ("PATCH", re.compile(r"^/subscription$")),                             # org plan change (service logs previous/new plan)
     ("POST", re.compile(rf"^/livestock(?:/{_ID}/status)?$")),              # create animal, change animal status
     ("PATCH", re.compile(rf"^/livestock/{_ID}$")),                         # update animal
     ("POST", re.compile(rf"^/crops(?:/{_ID}/status)?$")),                  # create planting, change planting status

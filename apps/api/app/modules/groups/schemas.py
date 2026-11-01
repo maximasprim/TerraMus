@@ -17,6 +17,7 @@ class GroupCreate(BaseModel):
     initial_count: int = Field(gt=0, le=1_000_000)
     acquisition_cost: Decimal = Field(default=Decimal("0"), ge=0)
     notes: str | None = None
+    production_cycle_id: uuid.UUID | None = None
 
 
 class RecordCreate(BaseModel):

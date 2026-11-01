@@ -5,18 +5,21 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Card, EmptyState, ErrorState, Input, Modal, Select } from "@/components/ui";
 import { apiFetch } from "@/lib/api";
 import { errMsg, FarmOption, FIELD, IntakeBatch, kes, parseTagLines, SaleBatch, todayIso } from "./shared";
+import { useCycle } from "@/lib/cycle-context";
 
 interface RegisterResult { created: number; results: { animal_number: string; status: string; detail?: string }[] }
 
 export function BatchesTab() {
   const qc = useQueryClient();
+  const { current, cycles } = useCycle();
+  const pickable = cycles.filter((c) => c.status !== "closed");
   const [intakeOpen, setIntakeOpen] = useState(false);
   const [saleOpen, setSaleOpen] = useState(false);
   const [addFor, setAddFor] = useState<IntakeBatch | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reg, setReg] = useState<RegisterResult | null>(null);
   const [lines, setLines] = useState("");
-  const [ib, setIb] = useState({ delivered_on: todayIso(), farm_id: "", source: "", sex_class: "bull", head_purchased: "", purchase_cost: "", transport_cost: "", other_fees: "", handlers_cost: "" });
+  const [ib, setIb] = useState({ delivered_on: todayIso(), farm_id: "", source: "", sex_class: "bull", head_purchased: "", purchase_cost: "", transport_cost: "", other_fees: "", handlers_cost: "", cycle: "" });
   const [sb, setSb] = useState({ sold_on: todayIso(), price_per_kg: "", buyer_name: "" });
 
   const farms = useQuery<FarmOption[]>({ queryKey: ["farms"], queryFn: () => apiFetch<FarmOption[]>("/api/v1/farms") });
@@ -29,7 +32,8 @@ export function BatchesTab() {
     mutationFn: () => apiFetch("/api/v1/feedlot/intake-batches", { method: "POST", body: JSON.stringify({
       delivered_on: ib.delivered_on, farm_id: ib.farm_id || undefined, source: ib.source || undefined, sex_class: ib.sex_class,
       head_purchased: Number(ib.head_purchased) || 0, purchase_cost: money(ib.purchase_cost), transport_cost: money(ib.transport_cost),
-      other_fees: money(ib.other_fees), handlers_cost: money(ib.handlers_cost) }) }),
+      other_fees: money(ib.other_fees), handlers_cost: money(ib.handlers_cost),
+      production_cycle_id: ib.cycle || null }) }),     // explicit (null = deliberately no cycle), so the header filter never overrides this choice
     onSuccess: () => { refresh(); setIntakeOpen(false); setError(null); },
     onError: (e) => setError(errMsg(e, "Could not create the batch")),
   });
@@ -55,14 +59,14 @@ export function BatchesTab() {
       <Card>
         <div className="mb-3 flex items-center justify-between">
           <h2 className="font-display text-lg text-forest">Intake batches</h2>
-          <Button onClick={() => { setError(null); setIb({ ...ib, farm_id: ib.farm_id || farms.data?.[0]?.id || "" }); setIntakeOpen(true); }}>+ New intake batch</Button>
+          <Button onClick={() => { setError(null); setIb({ ...ib, farm_id: ib.farm_id || farms.data?.[0]?.id || "", cycle: current && current.status !== "closed" ? current.id : "" }); setIntakeOpen(true); }}>+ New intake batch</Button>
         </div>
         {intake.error && <ErrorState message={errMsg(intake.error, "Failed to load batches")} />}
         {intake.data && intake.data.length === 0 && <EmptyState title="No intake batches" body="Create one when a group of animals arrives, then add the animals with their entry weights." />}
         <div className="overflow-x-auto"><table className="w-full text-sm"><tbody>
           {(intake.data ?? []).map((b) => (
             <tr key={b.id} className="border-b border-hairline/60">
-              <td className="py-2"><div className="font-medium">{b.name}</div><div className="text-xs text-muted">{b.delivered_on}{b.source ? ` · ${b.source}` : ""} · {b.sex_class}</div></td>
+              <td className="py-2"><div className="font-medium">{b.name}{b.production_cycle_id && <span className="ml-2 rounded-full border border-forest/30 bg-forest/10 px-2 py-0.5 text-[11px] font-normal text-forest">{cycles.find((c) => c.id === b.production_cycle_id)?.name ?? "cycle"}</span>}</div><div className="text-xs text-muted">{b.delivered_on}{b.source ? ` · ${b.source}` : ""} · {b.sex_class}</div></td>
               <td className="text-right text-xs">{b.head_registered} of {b.head_purchased} added<div className="text-muted">KES {kes(b.landed_cost_per_head)} / head</div></td>
               <td className="text-right"><Button variant="ghost" onClick={() => { setError(null); setReg(null); setLines(""); setAddFor(b); }}>Add animals</Button></td>
             </tr>))}
@@ -99,6 +103,11 @@ export function BatchesTab() {
               {["bull", "steer", "heifer", "mixed"].map((c) => <option key={c} value={c}>{c}</option>)}
             </Select>
           </div>
+          {pickable.length > 0 && (
+            <Select label="Production cycle" value={ib.cycle} onChange={(e) => setIb({ ...ib, cycle: e.target.value })}>
+              <option value="">Not in a cycle (assign later)</option>
+              {pickable.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.status})</option>)}
+            </Select>)}
           <Input label="Head purchased" type="number" min="0" value={ib.head_purchased} onChange={(e) => setIb({ ...ib, head_purchased: e.target.value })} />
           <div className="grid grid-cols-2 gap-3">
             <Input label="Purchase cost (KES)" type="number" min="0" value={ib.purchase_cost} onChange={(e) => setIb({ ...ib, purchase_cost: e.target.value })} />

@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.events import publish
 from app.modules.livestock.models import Animal, AnimalEvent, WeightRecord, Movement, INACTIVE_STATUSES
 from app.modules.livestock import schemas
+from app.modules.cycles import resolve as cyc_resolve
+from app.modules.cycles.deps import CycleSel
 
 
 # Allowed status transitions (spec §52.1/§52.2: sold/reserved animals guarded).
@@ -248,16 +250,17 @@ def compute_profitability(animal: Animal) -> schemas.AnimalProfitability:
     )
 
 
-async def get_herd_summary(db: AsyncSession, org_id: uuid.UUID) -> dict:
+async def get_herd_summary(db: AsyncSession, org_id: uuid.UUID, cycle: CycleSel | None = None) -> dict:
     """Backs the dashboard 'Total Herd' style cards (spec §24/§68). Factored
     out of the router so reporting/service.py can compose it into the
     cross-module dashboard without duplicating the query."""
-    base = select(func.count(Animal.id)).where(Animal.organization_id == org_id)
+    scope = [] if cycle is None else [Animal.id.in_(cyc_resolve.animal_ids_in(org_id, cycle))]   # one production cycle's animals
+    base = select(func.count(Animal.id)).where(Animal.organization_id == org_id, *scope)
     total = (await db.execute(base)).scalar_one()
     active = (await db.execute(base.where(Animal.status.notin_(INACTIVE_STATUSES)))).scalar_one()
     by_species_rows = await db.execute(
         select(Animal.species, func.count(Animal.id))
-        .where(Animal.organization_id == org_id, Animal.status.notin_(INACTIVE_STATUSES))
+        .where(Animal.organization_id == org_id, Animal.status.notin_(INACTIVE_STATUSES), *scope)
         .group_by(Animal.species)
     )
     for_sale = (await db.execute(base.where(Animal.status == "for_sale"))).scalar_one()
@@ -266,7 +269,7 @@ async def get_herd_summary(db: AsyncSession, org_id: uuid.UUID) -> dict:
     deceased = (await db.execute(base.where(Animal.status == "deceased"))).scalar_one()
     herd_value_row = await db.execute(
         select(func.coalesce(func.sum(Animal.current_value), 0)).where(
-            Animal.organization_id == org_id, Animal.status.notin_(INACTIVE_STATUSES),
+            Animal.organization_id == org_id, Animal.status.notin_(INACTIVE_STATUSES), *scope,
         )
     )
     return {
