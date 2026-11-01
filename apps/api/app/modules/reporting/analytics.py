@@ -353,8 +353,23 @@ async def _health(db, org_id, tz: str, keys: list[str], start: date, end: date) 
 
 # --- entry point ------------------------------------------------------------
 
-async def analytics_report(db: AsyncSession, org_id: uuid.UUID, months: int, cycle: CycleSel | None = None) -> s.AnalyticsReport:
+async def _months_covering_cycle(db: AsyncSession, org_id: uuid.UUID, months: int, cycle: CycleSel, today: date) -> int:
+    """At least `months`, widened (up to the 24-month limit) to reach back to the cycle's first ledger entry, so a
+    cycle's charts are not cut off at the last N months."""
+    first = (await db.execute(
+        select(func.min(FinanceTransaction.transaction_date))
+        .where(FinanceTransaction.organization_id == org_id, cyc_resolve.ledger_cond(cycle)))).scalar_one_or_none()
+    if first is None:
+        return months
+    span = (today.year - first.year) * 12 + (today.month - first.month) + 1
+    return max(months, min(span, 24))
+
+
+async def analytics_report(db: AsyncSession, org_id: uuid.UUID, months: int, cycle: CycleSel | None = None,
+                           fit_cycle: bool = False) -> s.AnalyticsReport:
     tz, today = await resolve_timezone(db, org_id)
+    if fit_cycle and cycle is not None:
+        months = await _months_covering_cycle(db, org_id, months, cycle, today)
     keys = month_keys(today, months)
     start = month_start(keys[0])
     return s.AnalyticsReport(

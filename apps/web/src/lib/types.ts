@@ -1009,3 +1009,28 @@ export interface PlantingBreakdown {
   web_sales: { order_id: string; date: string; quantity: string; unit_price: string; amount: string; status: string }[];
 }
 export interface CropSaleResult { sale: CropSaleRow; ledger: string; stock_warning: string | null }
+
+// --- Role management (owner-controlled access) ---
+export interface RoleDetail {
+  id: string;
+  name: string;
+  description: string | null;
+  is_system: boolean;
+  locked: boolean;
+  permissions: string[];
+  default_permissions: string[] | null;
+  differs_from_default: boolean;
+  user_count: number;
+}
+
+export interface RolePermissionInfo {
+  code: string;
+  description: string;
+  group: string;
+  group_label: string;
+}
+
+export interface RoleCatalog {
+  permissions: RolePermissionInfo[];
+  can_grant: string[];
+}

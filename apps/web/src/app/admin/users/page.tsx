@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AdminShell } from "@/components/admin-shell";
 import { Card, Button, Input, Modal, ErrorState, EmptyState, TagChip } from "@/components/ui";
 import { apiFetch, ApiError } from "@/lib/api";
+import { RolesPanel } from "@/components/roles-panel";
 import type { UserMe, Role } from "@/lib/types";
 
 export default function UsersPage() {
@@ -13,6 +14,7 @@ export default function UsersPage() {
   const [error, setError] = useState<string | null>(null);
   const [editingUser, setEditingUser] = useState<UserMe | null>(null);
   const [roleError, setRoleError] = useState<string | null>(null);
+  const [tab, setTab] = useState<"team" | "roles">("team");
 
   const usersQuery = useQuery<UserMe[]>({
     queryKey: ["users"],
@@ -54,6 +56,23 @@ export default function UsersPage() {
         </div>
         <Button onClick={() => { setError(null); setModalOpen(true); }}>+ Invite staff member</Button>
       </div>
+
+      <div className="mb-4 flex gap-1 border-b border-hairline text-sm">
+        {([["team", "Team"], ["roles", "Roles & access"]] as const).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setTab(key)}
+            className={`-mb-px border-b-2 px-4 py-2 ${tab === key ? "border-forest font-medium text-forest" : "border-transparent text-muted hover:text-ink"}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "roles" && <RolesPanel />}
+      {tab === "team" && (
+      <>
 
       {usersQuery.error && (
         <ErrorState message={usersQuery.error instanceof ApiError ? usersQuery.error.message : "Failed to load team"} />
@@ -100,6 +119,8 @@ export default function UsersPage() {
             </tbody>
           </table>
         </div>
+      )}
+      </>
       )}
 
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="Invite staff member">

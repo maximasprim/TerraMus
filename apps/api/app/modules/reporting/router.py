@@ -32,13 +32,14 @@ async def dashboard(
 @router.get("/analytics", response_model=analytics_schemas.AnalyticsReport)
 async def analytics_report(
     months: int = Query(6, ge=1, le=24, description="How many calendar months to chart, ending with the current one"),
+    fit_cycle: bool = Query(False, description="With a production cycle selected, widen the window (up to 24 months) to reach back to the cycle's first ledger entry"),
     user: User = Depends(require_permission("reports.view")),
     db: AsyncSession = Depends(get_db),
     cycle: CycleSel | None = Depends(cycle_filter),
 ):
     """Chart-ready aggregates (finance, sales, herd, dairy, crops, inventory, health)
     for the dashboard and the reports page. Read-only; scoped to the caller's org."""
-    return await analytics.analytics_report(db, user.organization_id, months, cycle)
+    return await analytics.analytics_report(db, user.organization_id, months, cycle, fit_cycle)
 
 
 @router.get("/profitability", response_model=schemas.ProfitabilityReport)

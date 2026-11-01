@@ -14,6 +14,7 @@ from app.core.security_checks import daraja_warnings, security_warnings
 from app.modules.commerce.storage import config_from_settings as storage_config, config_warning as storage_warning
 from app.core.observability import PrometheusMiddleware, register_metrics_endpoint, setup_tracing
 from app.modules.identity.router import router as auth_router, users_router, audit_router, organization_router
+from app.modules.identity.roles import roles_router
 from app.modules.farm.router import router as farm_router
 from app.modules.livestock.router import router as livestock_router
 from app.modules.crops.router import router as crops_router
@@ -171,6 +172,7 @@ setup_tracing(app)  # spec §47 - no-op unless OTEL_EXPORTER_OTLP_ENDPOINT is se
 
 app.include_router(auth_router)
 app.include_router(users_router)
+app.include_router(roles_router)
 app.include_router(audit_router)
 app.include_router(organization_router)
 app.include_router(farm_router)
