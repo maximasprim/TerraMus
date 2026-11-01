@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AdminShell } from "@/components/admin-shell";
 import { Button, Card, EmptyState, ErrorState, Input, StatCard } from "@/components/ui";
 import { apiDownload, apiFetch, apiUpload, ApiError } from "@/lib/api";
+import { ImportProgressBar, useImportProgress } from "@/components/import-progress";
 import { useCycle } from "@/lib/cycle-context";
 import { BatchesTab } from "./batches-tab";
 import { CostingTab } from "./costing-tab";
@@ -345,13 +346,19 @@ function Worksheet() {
     onSuccess: (c) => { queryClient.invalidateQueries({ queryKey: ["production-cycles"] }); setImportCycle(c.id); setNewCycleName(""); setReport(null); setError(null); },
     onError: (e) => setError(e instanceof Error ? e.message : "Could not create the cycle"),
   });
+  const progress = useImportProgress();
   const run = useMutation({
-    mutationFn: (dry: boolean) => {
+    mutationFn: async (dry: boolean) => {
       if (!file) throw new Error("Choose the .xlsx worksheet first");
       if (!importCycle) throw new Error("Choose or create the production cycle this worksheet belongs to first");
       const fd = new FormData();
       fd.append("file", file);
-      return apiUpload<ImportReport>(`/api/v1/feedlot/worksheet/import?dry_run=${dry}&post_to_finance=${postToFinance}&production_cycle_id=${importCycle}`, fd);
+      progress.begin(file.size);
+      try {
+        const d = await apiUpload<ImportReport>(`/api/v1/feedlot/worksheet/import?dry_run=${dry}&post_to_finance=${postToFinance}&production_cycle_id=${importCycle}`, fd, { onProgress: progress.onUpload });
+        progress.end(true);
+        return d;
+      } catch (e) { progress.end(false); throw e; }
     },
     onSuccess: (d) => { setReport(d); setError(null); if (!d.dry_run && d.ok) queryClient.invalidateQueries({ queryKey: ["feedlot"] }); },
     onError: (e) => setError(e instanceof Error ? e.message : "Import failed"),
@@ -388,6 +395,7 @@ function Worksheet() {
           <span>Also record the <b>new</b> sales and purchases in Finance, dated on the day they happened. Each is recorded once only, so re-importing never doubles anything.</span>
         </label>
         {error && <ErrorState message={error} />}
+        <ImportProgressBar state={progress.state} action="Reading and checking your worksheet" />
         <div className="flex gap-2">
           <Button variant="ghost" disabled={!file || !importCycle || run.isPending} onClick={() => run.mutate(true)}>Preview</Button>
           <Button disabled={!file || !importCycle || run.isPending || !report || !report.dry_run || !report.ok} onClick={() => run.mutate(false)}>Import</Button>

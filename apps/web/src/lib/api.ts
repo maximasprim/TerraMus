@@ -162,6 +162,24 @@ export async function apiFetch<T>(
   return resp.json() as Promise<T>;
 }
 
+/** fetch-compatible upload that reports how much of the body has been sent (0..1). Resolves to a Response so the
+ * caller's existing 401 / error / JSON handling is reused unchanged. */
+function xhrUpload(
+  url: string, method: string, headers: Record<string, string>, body: FormData, onProgress: (f: number) => void,
+): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(method, url);
+    Object.entries(headers).forEach(([k, v]) => xhr.setRequestHeader(k, v));
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable && e.total > 0) onProgress(e.loaded / e.total); };
+    xhr.upload.onload = () => onProgress(1);
+    xhr.onload = () => resolve(new Response(xhr.responseText, { status: xhr.status, statusText: xhr.statusText }));
+    xhr.onerror = () => reject(new TypeError("Network request failed"));
+    xhr.onabort = () => reject(new TypeError("Upload cancelled"));
+    xhr.send(body);
+  });
+}
+
 /** For multipart/form-data endpoints (bulk import) - apiFetch always sets
  * Content-Type: application/json, which would break a file upload; this
  * intentionally omits that header so fetch sets the correct multipart
@@ -169,11 +187,16 @@ export async function apiFetch<T>(
 export async function apiUpload<T>(
   path: string,
   formData: FormData,
-  options: { method?: string } = {},
+  options: { method?: string; onProgress?: (fractionUploaded: number) => void } = {},
 ): Promise<T> {
   const doFetch = async (token: string | null) => {
     const headers: Record<string, string> = {};
     if (token) headers.Authorization = `Bearer ${token}`;
+    // Only when a caller asks for progress do we use XMLHttpRequest (fetch cannot report upload progress);
+    // every other caller keeps the exact fetch path it always had.
+    if (options.onProgress) {
+      return xhrUpload(`${API_BASE}${path}`, options.method ?? "POST", headers, formData, options.onProgress);
+    }
     return fetch(`${API_BASE}${path}`, { method: options.method ?? "POST", headers, body: formData });
   };
 
