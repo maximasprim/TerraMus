@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { PlatformShell } from "@/components/platform-shell";
+import { DeleteOrganizationDialog } from "@/components/platform-delete-organization-dialog";
 import { Card, Button, Input, ErrorState, EmptyState, StatusBadge } from "@/components/ui";
 import { PlatformApiError, platformApiFetch, platformApiFetchAll } from "@/lib/platform-api";
 import { usePlatformMe } from "@/lib/use-platform-auth";
@@ -15,6 +16,7 @@ export default function OrganizationsPage() {
   const canWrite = me?.role === "superadmin";
   const [search, setSearch] = useState("");
   const [actionError, setActionError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
 
   const orgsQuery = useQuery<OrganizationSummaryOut[]>({
     queryKey: ["platform-organizations", search],
@@ -91,14 +93,25 @@ export default function OrganizationsPage() {
                   </td>
                   <td className="px-4 py-3 text-right">
                     {canWrite && (
-                      <Button
-                        variant="ghost"
-                        className="text-xs"
-                        disabled={toggleSuspend.isPending}
-                        onClick={() => toggleSuspend.mutate({ orgId: org.id, isSuspended: !org.is_suspended })}
-                      >
-                        {org.is_suspended ? "Reactivate" : "Suspend"}
-                      </Button>
+                      <div className="flex justify-end gap-2">
+                        {org.is_suspended && (
+                          <button
+                            type="button"
+                            className="rounded-md border border-clay/40 px-3 py-2 text-xs font-medium text-clay hover:bg-clay hover:text-paper"
+                            onClick={() => setDeleting({ id: org.id, name: org.name })}
+                          >
+                            Delete
+                          </button>
+                        )}
+                        <Button
+                          variant="ghost"
+                          className="text-xs"
+                          disabled={toggleSuspend.isPending}
+                          onClick={() => toggleSuspend.mutate({ orgId: org.id, isSuspended: !org.is_suspended })}
+                        >
+                          {org.is_suspended ? "Reactivate" : "Suspend"}
+                        </Button>
+                      </div>
                     )}
                   </td>
                 </tr>
@@ -106,6 +119,20 @@ export default function OrganizationsPage() {
             </tbody>
           </table>
         </div>
+      )}
+      {deleting && (
+        <DeleteOrganizationDialog
+          orgId={deleting.id}
+          orgName={deleting.name}
+          open
+          onClose={() => setDeleting(null)}
+          onDeleted={() => {
+            setDeleting(null);
+            setActionError(null);
+            queryClient.invalidateQueries({ queryKey: ["platform-organizations"] });
+            queryClient.invalidateQueries({ queryKey: ["platform-dashboard"] });
+          }}
+        />
       )}
     </PlatformShell>
   );

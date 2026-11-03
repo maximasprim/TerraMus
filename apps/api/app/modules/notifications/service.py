@@ -104,6 +104,14 @@ async def mark_all_read(db: AsyncSession, user: User) -> int:
     return result.rowcount
 
 
+async def list_preferences(db: AsyncSession, user: User) -> list[dict]:
+    result = await db.execute(
+        select(NotificationPreference).where(NotificationPreference.user_id == user.id)
+        .order_by(NotificationPreference.category)
+    )
+    return [{"category": p.category, "enabled": p.enabled} for p in result.scalars().all()]
+
+
 async def set_preference(db: AsyncSession, user: User, category: str, enabled: bool) -> NotificationPreference:
     result = await db.execute(
         select(NotificationPreference).where(

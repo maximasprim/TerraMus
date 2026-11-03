@@ -37,6 +37,22 @@ async def get_current_user(
     user = result.unique().scalar_one_or_none()
     if not user or not user.is_active:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User not found or inactive")
+    imp = payload.get("imp")
+    if imp:
+        # A superadmin's workspace session (platform_admin/impersonation.py). Re-checked on every request, so
+        # deactivating or demoting the platform admin ends the session immediately. It may work inside a
+        # suspended organization (that is how a superadmin sorts one out); `impersonated_by` makes
+        # get_user_permissions grant every permission.
+        from app.modules.platform_admin.models import PlatformAdmin
+
+        try:
+            admin = await db.get(PlatformAdmin, uuid.UUID(str(imp)))
+        except ValueError:
+            admin = None
+        if not admin or not admin.is_active or admin.role != "superadmin":
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Workspace session is no longer valid")
+        user.impersonated_by = admin.id
+        return user
     # Platform-admin superuser feature: a suspended organization's users
     # are rejected here, which every tenant route already depends on via
     # this same function - so suspension takes effect everywhere at once

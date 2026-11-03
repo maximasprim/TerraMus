@@ -112,6 +112,8 @@ def _tenant_org(request: Request) -> uuid.UUID | None:
         payload = decode_token(token)
         if payload.get("type") != "access" or not payload.get("org"):
             return None
+        if payload.get("imp"):
+            return None  # a superadmin's workspace session is never limited by the tenant's hidden menus
         return uuid.UUID(str(payload["org"]))
     except Exception:
         return None

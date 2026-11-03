@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, clearTokens, getAccessToken, isNetworkFailure, readCachedMe, setTokens, writeCachedMe } from "@/lib/api";
 import { hasPermission } from "@/lib/permissions";
+import { clearWorkspaceSession, exitWorkspace, getWorkspaceSession } from "@/lib/impersonation";
 import type { MeResponse, TokenPair } from "@/lib/types";
 
 export function useMe() {
@@ -52,6 +53,14 @@ export function useRequireAuth() {
     if (meQuery.isError) {
       // A lost connection is not a lost session: never sign the user out because the network is down.
       if (isNetworkFailure(meQuery.error)) return;
+      if (getWorkspaceSession()) {
+        // A superadmin's workspace session ended (expired, or the platform admin was deactivated): back to the
+        // platform console - never sign out the real tenant login stored in this browser.
+        const orgId = getWorkspaceSession()?.orgId;
+        clearWorkspaceSession();
+        window.location.assign(orgId ? `/platform/organizations/${orgId}` : "/platform/organizations");
+        return;
+      }
       clearTokens();
       router.replace("/login");
       return;
@@ -112,6 +121,8 @@ export function useLogout() {
   const router = useRouter();
   const queryClient = useQueryClient();
   return useCallback(() => {
+    // Inside a superadmin workspace session "sign out" means leave the workspace; the stored tenant login is untouched.
+    if (getWorkspaceSession()) { exitWorkspace(); return; }
     clearTokens();
     queryClient.clear();
     router.push("/login");

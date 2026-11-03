@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { clsx } from "clsx";
 import { PlatformShell } from "@/components/platform-shell";
 import { PlatformResourceBrowser } from "@/components/platform-resource-browser";
+import { PlatformWorkspaceHandoff } from "@/components/platform-workspace-handoff";
 import { ErrorState } from "@/components/ui";
 import { usePlatformMe } from "@/lib/use-platform-auth";
 import { PLATFORM_MODULES, getModuleConfig } from "@/lib/platform-modules";
@@ -46,6 +47,10 @@ export default function OrgModulePage() {
 
       {!config ? (
         <ErrorState message={`Unknown module "${module}".`} />
+      ) : config.workspaceMenu && !me ? (
+        <p className="text-sm text-muted">Loading…</p>
+      ) : config.workspaceMenu && me?.role === "superadmin" ? (
+        <PlatformWorkspaceHandoff orgId={id} label={config.label} menu={config.workspaceMenu} />
       ) : (
         <PlatformResourceBrowser orgId={id} config={config} canWrite={me?.role === "superadmin"} />
       )}

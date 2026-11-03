@@ -72,6 +72,10 @@ export function editFieldsFor(config: ModuleConfig): ModuleField[] {
 export interface ModuleConfig {
   slug: string;
   label: string;
+  /** The tenant admin menu (e.g. "/admin/orders") that does everything this tab only partly does. A superadmin
+   * opening the tab is sent into that menu in the organization's workspace; viewer admins, who cannot start a
+   * workspace session, keep this tab's read-only list. */
+  workspaceMenu?: string;
   listPath: (orgId: string) => string;
   columns: ModuleColumn[];
   fields?: ModuleField[]; // present => full CRUD
@@ -261,6 +265,7 @@ export const PLATFORM_MODULES: ModuleConfig[] = [
   {
     slug: "inventory",
     label: "Inventory",
+    workspaceMenu: "/admin/inventory",
     singular: "Inventory item",
     listPath: (org) => `/api/v1/platform/organizations/${org}/inventory/items`,
     createPath: (org) => `/api/v1/platform/organizations/${org}/inventory/items`,
@@ -308,6 +313,7 @@ export const PLATFORM_MODULES: ModuleConfig[] = [
   {
     slug: "purchase-orders",
     label: "Purchase orders",
+    workspaceMenu: "/admin/procurement",
     listPath: (org) => `/api/v1/platform/organizations/${org}/procurement/purchase-orders`,
     columns: [
       { key: "po_number", label: "PO #" }, { key: "supplier_id", label: "Supplier" },
@@ -322,6 +328,7 @@ export const PLATFORM_MODULES: ModuleConfig[] = [
   {
     slug: "orders",
     label: "Orders",
+    workspaceMenu: "/admin/orders",
     listPath: (org) => `/api/v1/platform/organizations/${org}/commerce/orders`,
     columns: [
       { key: "id", label: "Order #", format: "shortid" }, { key: "customer_id", label: "Customer" },
@@ -336,6 +343,7 @@ export const PLATFORM_MODULES: ModuleConfig[] = [
   {
     slug: "listings",
     label: "Listings",
+    workspaceMenu: "/admin/listings",
     listPath: (org) => `/api/v1/platform/organizations/${org}/commerce/listings`,
     columns: [
       { key: "title", label: "Title" }, { key: "pricing_type", label: "Pricing" },
@@ -352,6 +360,7 @@ export const PLATFORM_MODULES: ModuleConfig[] = [
   {
     slug: "finance",
     label: "Finance",
+    workspaceMenu: "/admin/finance",
     listPath: (org) => `/api/v1/platform/organizations/${org}/finance/transactions`,
     columns: [
       { key: "transaction_date", label: "Date", format: "date" }, { key: "transaction_type", label: "Type" },

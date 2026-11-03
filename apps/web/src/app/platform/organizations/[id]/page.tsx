@@ -1,10 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { PlatformShell } from "@/components/platform-shell";
+import { DeleteOrganizationDialog } from "@/components/platform-delete-organization-dialog";
+import { PlatformWorkspacePanel } from "@/components/platform-workspace-panel";
 import { Card, Button, ErrorState } from "@/components/ui";
 import { platformApiFetch, PlatformApiError } from "@/lib/platform-api";
 import { usePlatformMe } from "@/lib/use-platform-auth";
@@ -24,6 +26,8 @@ export default function OrganizationDetailPage() {
   const { data: me } = usePlatformMe();
   const canWrite = me?.role === "superadmin";
   const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const orgQuery = useQuery<OrganizationSummaryOut>({
     queryKey: ["platform-organization", id],
@@ -107,13 +111,24 @@ export default function OrganizationDetailPage() {
           <p className="text-sm text-muted">{org.slug} · {org.currency}</p>
         </div>
         {canWrite && (
-          <Button
-            variant={org.is_suspended ? "primary" : "ghost"}
-            disabled={toggleSuspend.isPending}
-            onClick={() => toggleSuspend.mutate(!org.is_suspended)}
-          >
-            {org.is_suspended ? "Reactivate organization" : "Suspend organization"}
-          </Button>
+          <div className="flex items-center gap-2">
+            {org.is_suspended && (
+              <button
+                type="button"
+                className="rounded-md border border-clay/40 px-4 py-2 text-sm font-medium text-clay hover:bg-clay hover:text-paper"
+                onClick={() => setConfirmingDelete(true)}
+              >
+                Delete permanently
+              </button>
+            )}
+            <Button
+              variant={org.is_suspended ? "primary" : "ghost"}
+              disabled={toggleSuspend.isPending}
+              onClick={() => toggleSuspend.mutate(!org.is_suspended)}
+            >
+              {org.is_suspended ? "Reactivate organization" : "Suspend organization"}
+            </Button>
+          </div>
         )}
       </div>
 
@@ -138,6 +153,10 @@ export default function OrganizationDetailPage() {
           <p className="text-xs font-medium uppercase tracking-wider text-muted">Subscription status</p>
           <p className="font-display text-2xl text-forest capitalize">{org.subscription_status ?? "-"}</p>
         </Card>
+      </div>
+
+      <div className="mt-4">
+        <PlatformWorkspacePanel orgId={org.id} orgName={org.name} canWrite={canWrite} />
       </div>
 
       {canWrite && (
@@ -218,21 +237,40 @@ export default function OrganizationDetailPage() {
         Created {new Date(org.created_at).toLocaleDateString()}.
       </p>
 
-      <div className="mb-2 mt-8 flex flex-wrap gap-1 border-b border-hairline">
-        {PLATFORM_MODULES.map((m) => (
-          <Link
-            key={m.slug}
-            href={`/platform/organizations/${org.id}/${m.slug}`}
-            className="rounded-t-md px-3 py-2 text-sm text-muted hover:bg-white/40"
-          >
-            {m.label}
-          </Link>
-        ))}
-      </div>
-      <p className="text-xs text-muted">
-        Browse this organization&apos;s data by module above - health, breeding, and dairy records
-        are per-animal and aren&apos;t covered by this tab bar; use the API directly for those.
-      </p>
+      {/* Superadmins work through the Tenant workspace panel above, which covers every menu. Viewer admins cannot
+          start a workspace session, so they keep the read-only module tabs as their only way to look at tenant data. */}
+      {me && me.role !== "superadmin" && (
+        <>
+          <div className="mb-2 mt-8 flex flex-wrap gap-1 border-b border-hairline">
+            {PLATFORM_MODULES.map((m) => (
+              <Link
+                key={m.slug}
+                href={`/platform/organizations/${org.id}/${m.slug}`}
+                className="rounded-t-md px-3 py-2 text-sm text-muted hover:bg-white/40"
+              >
+                {m.label}
+              </Link>
+            ))}
+          </div>
+          <p className="text-xs text-muted">
+            Browse this organization&apos;s data by module above - health, breeding, and dairy records
+            are per-animal and aren&apos;t covered by this tab bar; use the API directly for those.
+          </p>
+        </>
+      )}
+      {confirmingDelete && (
+        <DeleteOrganizationDialog
+          orgId={org.id}
+          orgName={org.name}
+          open
+          onClose={() => setConfirmingDelete(false)}
+          onDeleted={() => {
+            queryClient.invalidateQueries({ queryKey: ["platform-organizations"] });
+            queryClient.invalidateQueries({ queryKey: ["platform-dashboard"] });
+            router.replace("/platform/organizations");
+          }}
+        />
+      )}
     </PlatformShell>
   );
 }

@@ -443,8 +443,7 @@ export default function OrganizationCatalogPage() {
           <h2 className="font-display text-xl text-forest">Menus</h2>
           <p className="mt-0.5 text-sm text-muted">
             Tick the sections {org.name} can see. An unticked section disappears from their sidebar, its pages show an
-            &ldquo;isn&apos;t available&rdquo; notice, and nothing new can be added to or changed in it (the same as
-            switching Livestock or Crops off). Records already there stay viewable, and the public shop is not affected.
+            &ldquo;isn&apos;t available&rdquo; notice, and nothing new can be added to or changed in it. Records already there stay viewable, and the public shop is not affected.
             Dashboard and Notifications are always shown.
           </p>
           <div className="mt-2 flex items-center justify-between text-xs text-muted">

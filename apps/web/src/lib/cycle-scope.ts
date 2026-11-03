@@ -71,17 +71,23 @@ export function scopeBody(path: string, method: string | undefined, body: BodyIn
   }
 }
 
+/** A superadmin workspace session keeps its own cycle choice (per tab), so another organization's cycle id can never leak in. */
+function cycleStorage(): Storage {
+  // Reads the marker directly (instead of importing lib/impersonation) so this file stays import-free and unit-testable.
+  try { return sessionStorage.getItem("farm.workspace_session") ? sessionStorage : localStorage; } catch { return localStorage; }
+}
+
 /** What this browser remembers: null = the person has never chosen, "all" = they chose "All cycles", otherwise an id. */
 export function readStoredCycle(): string | null {
   if (typeof window === "undefined") return null;
-  try { return localStorage.getItem(CYCLE_STORAGE_KEY); } catch { return null; }
+  try { return cycleStorage().getItem(CYCLE_STORAGE_KEY); } catch { return null; }
 }
 /** Remember a deliberate choice. Choosing "All cycles" is stored as "all" so it is not mistaken for "never chose". */
 export function storeCycle(id: string | null): void {
-  try { localStorage.setItem(CYCLE_STORAGE_KEY, id ?? "all"); } catch { /* storage blocked: the choice just resets on reload */ }
+  try { cycleStorage().setItem(CYCLE_STORAGE_KEY, id ?? "all"); } catch { /* storage blocked: the choice just resets on reload */ }
 }
 export function forgetStoredCycle(): void {
-  try { localStorage.removeItem(CYCLE_STORAGE_KEY); } catch { /* ignore */ }
+  try { cycleStorage().removeItem(CYCLE_STORAGE_KEY); } catch { /* ignore */ }
 }
 
 /**

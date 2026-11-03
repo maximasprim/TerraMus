@@ -47,6 +47,8 @@ from app.modules.inquiries.router import router as inquiries_router, public_rout
 from app.modules.platform_admin.router import router as platform_admin_router
 from app.modules.platform_admin.tenant_crud_router import router as platform_tenant_crud_router
 from app.modules.platform_admin.audit_middleware import PlatformAuditMiddleware
+from app.modules.platform_admin.impersonation import ImpersonationAuditMiddleware, router as platform_workspace_router
+from app.modules.platform_admin.org_deletion import router as platform_org_deletion_router
 from app.modules.billing.router import router as billing_router, webhooks_router as billing_webhooks_router
 from app.modules.feedlot.router import router as feedlot_router
 from app.modules.receivables.router import router as receivables_router
@@ -157,6 +159,7 @@ app.add_middleware(PrometheusMiddleware)  # spec §47 - before CORS so every res
 # other custom middleware doesn't matter for correctness. Grouped here with
 # the rest of the app's own middleware, ahead of CORS, for consistency.
 app.add_middleware(PlatformAuditMiddleware)
+app.add_middleware(ImpersonationAuditMiddleware)
 install_sql_timing(engine)                # per-request SQL count/time (see core/timing.py); REQUEST_TIMING=false switches it off
 app.add_middleware(RequestTimingMiddleware)
 app.add_middleware(
@@ -225,6 +228,8 @@ app.include_router(inquiries_public_router)
 # --- platform-admin / billing ----------------------------------------------
 app.include_router(platform_admin_router)
 app.include_router(platform_tenant_crud_router)
+app.include_router(platform_workspace_router)
+app.include_router(platform_org_deletion_router)
 app.include_router(billing_router)
 app.include_router(billing_webhooks_router)
 

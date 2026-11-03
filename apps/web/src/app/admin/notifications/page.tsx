@@ -28,9 +28,28 @@ export default function NotificationsPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["notifications"] }),
   });
 
+  // Which categories are switched on. A category with no saved choice is ON (the backend default), so until this
+  // loads - or if it fails - everything is shown as on rather than guessing "off".
+  const prefsQuery = useQuery<{ category: string; enabled: boolean }[]>({
+    queryKey: ["notification-preferences"],
+    queryFn: () => apiFetch<{ category: string; enabled: boolean }[]>("/api/v1/notifications/preferences"),
+  });
+  const isOn = (cat: string) => prefsQuery.data?.find((p) => p.category === cat)?.enabled ?? true;
+
   const setPreference = useMutation({
     mutationFn: ({ category, enabled }: { category: string; enabled: boolean }) =>
       apiFetch("/api/v1/notifications/preferences", { method: "PUT", body: JSON.stringify({ category, enabled }) }),
+    // flip the switch straight away, put it back if the save fails
+    onMutate: async ({ category, enabled }) => {
+      await queryClient.cancelQueries({ queryKey: ["notification-preferences"] });
+      const previous = queryClient.getQueryData<{ category: string; enabled: boolean }[]>(["notification-preferences"]);
+      queryClient.setQueryData<{ category: string; enabled: boolean }[]>(["notification-preferences"], (old = []) => [
+        ...old.filter((p) => p.category !== category), { category, enabled },
+      ]);
+      return { previous };
+    },
+    onError: (_e, _v, ctx) => queryClient.setQueryData(["notification-preferences"], ctx?.previous),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["notification-preferences"] }),
   });
 
   return (
@@ -51,26 +70,40 @@ export default function NotificationsPage() {
       </div>
 
       <div className="mb-6">
-        <p className="mb-2 text-sm font-medium text-ink">Categories</p>
+        <p className="mb-1 text-sm font-medium text-ink">Categories</p>
+        <p className="mb-2 text-xs text-muted">Green means you get these notifications. Red means that category is muted for you.</p>
         <div className="flex flex-wrap gap-2">
-          {CATEGORIES.map((cat) => (
-            <div key={cat} className="flex items-center gap-1.5 rounded-full border border-hairline bg-white px-3 py-1 text-xs text-ink">
-              <span className="capitalize">{cat}</span>
-              <button
-                className="text-forest hover:underline"
-                onClick={() => setPreference.mutate({ category: cat, enabled: true })}
+          {CATEGORIES.map((cat) => {
+            const on = isOn(cat);
+            return (
+              <div
+                key={cat}
+                className={`flex items-center gap-2 rounded-full border px-3 py-1 text-xs ${on ? "border-green-500 bg-green-50 text-ink" : "border-red-400 bg-red-50 text-ink"}`}
               >
-                on
-              </button>
-              /
-              <button
-                className="text-muted hover:underline"
-                onClick={() => setPreference.mutate({ category: cat, enabled: false })}
-              >
-                off
-              </button>
-            </div>
-          ))}
+                <span className={`h-2 w-2 rounded-full ${on ? "bg-green-500" : "bg-red-500"}`} aria-hidden />
+                <span className="capitalize">{cat}</span>
+                <span className={`font-medium ${on ? "text-green-700" : "text-red-700"}`}>{on ? "On" : "Off"}</span>
+                <div className="flex overflow-hidden rounded-full border border-hairline" role="group" aria-label={`${cat} notifications`}>
+                  <button
+                    type="button"
+                    aria-pressed={on}
+                    className={`px-2 py-0.5 ${on ? "bg-green-500 text-white" : "bg-white text-muted hover:text-ink"}`}
+                    onClick={() => setPreference.mutate({ category: cat, enabled: true })}
+                  >
+                    on
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={!on}
+                    className={`px-2 py-0.5 ${!on ? "bg-red-500 text-white" : "bg-white text-muted hover:text-ink"}`}
+                    onClick={() => setPreference.mutate({ category: cat, enabled: false })}
+                  >
+                    off
+                  </button>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
 

@@ -367,6 +367,10 @@ def invalidate_permission_cache() -> None:
 
 
 async def get_user_permissions(db: AsyncSession, user: User) -> set[str]:
+    if getattr(user, "impersonated_by", None):
+        # A superadmin's workspace session (see identity/deps.py): everything a tenant can do, whatever the
+        # acting account's own role happens to hold.
+        return set((await db.execute(select(Permission.code))).scalars().all())
     if not user.roles:
         return set()
     role_ids = [role.id for role in user.roles]

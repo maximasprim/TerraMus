@@ -39,6 +39,16 @@ async def mark_all_read(
     return {"marked_read": count}
 
 
+@router.get("/preferences")
+async def get_preferences(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """The categories this user has explicitly switched on or off. A category with no row is on (the default), so
+    callers treat anything missing as enabled."""
+    return await service.list_preferences(db, user)
+
+
 @router.put("/preferences")
 async def set_preference(
     req: schemas.PreferenceUpdate,

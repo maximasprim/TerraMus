@@ -15,8 +15,13 @@ export const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:800
 const ACCESS_KEY = "farm.access_token";
 const REFRESH_KEY = "farm.refresh_token";
 
+import { getWorkspaceSession } from "@/lib/impersonation";
+
 export function getAccessToken(): string | null {
   if (typeof window === "undefined") return null;
+  // A superadmin's workspace session (lib/impersonation.ts) takes precedence over - and never touches - the stored login.
+  const workspace = getWorkspaceSession();
+  if (workspace) return workspace.token;
   return localStorage.getItem(ACCESS_KEY);
 }
 
@@ -41,6 +46,7 @@ const ME_CACHE_KEY = "farm.me_cache";
 
 export function readCachedMe<T>(): T | null {
   if (typeof window === "undefined") return null;
+  if (getWorkspaceSession()) return null;   // the cached profile belongs to the real login, not a workspace session
   try {
     const raw = localStorage.getItem(ME_CACHE_KEY);
     return raw ? (JSON.parse(raw) as T) : null;
@@ -50,6 +56,7 @@ export function readCachedMe<T>(): T | null {
 }
 
 export function writeCachedMe(me: unknown): void {
+  if (getWorkspaceSession()) return;        // never overwrite the real login's cached profile
   try {
     localStorage.setItem(ME_CACHE_KEY, JSON.stringify(me));
   } catch {
@@ -100,6 +107,7 @@ async function tokenAfter401(tokenUsed: string | null): Promise<string | null> {
 }
 
 async function performRefresh(): Promise<string | null> {
+  if (getWorkspaceSession()) return null;   // a workspace session has no refresh token; it simply ends when it expires
   const refresh_token = getRefreshToken();
   if (!refresh_token) return null;
   const resp = await fetch(`${API_BASE}/api/v1/auth/refresh`, {

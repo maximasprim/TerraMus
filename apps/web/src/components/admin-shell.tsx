@@ -11,6 +11,8 @@ import { useCatalog } from "@/lib/use-catalog";
 import { ShellFrame } from "@/components/shell-frame";
 import { CycleProvider } from "@/lib/cycle-context";
 import { CycleBanner, CycleSelector } from "@/components/cycle-selector";
+import { ImpersonationBanner } from "@/components/impersonation-banner";
+import { isWorkspaceSession } from "@/lib/impersonation";
 
 const NAV = [
   { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -62,6 +64,7 @@ function AdminShellFrame({ children }: { children: React.ReactNode }) {
   // menu hides every page under it, so typing its address shows a notice instead of the page.
   const hiddenMenus = catalog?.hidden_menus ?? [];
   function menuHidden(path: string) {
+    if (isWorkspaceSession()) return false;   // a superadmin sees every menu, including ones hidden for the tenant
     return hiddenMenus.some((m) => path === m || path.startsWith(m + "/"));
   }
   const pathname = usePathname();
@@ -129,10 +132,11 @@ function AdminShellFrame({ children }: { children: React.ReactNode }) {
           className="flex w-full items-center gap-2 border-t border-white/10 px-6 py-4 text-sm text-paper/70 hover:text-paper"
         >
           <LogOut size={16} />
-          Sign out
+          {isWorkspaceSession() ? "Exit workspace" : "Sign out"}
         </button>
       }
     >
+      <ImpersonationBanner />
       {pageHidden ? (
         <div className="mx-auto mt-16 max-w-md rounded-lg border border-hairline bg-white p-8 text-center">
           <h1 className="font-display text-xl text-forest">This section isn&apos;t available</h1>
