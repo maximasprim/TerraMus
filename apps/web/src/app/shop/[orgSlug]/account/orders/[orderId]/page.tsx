@@ -1,15 +1,22 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
+import { ArrowLeft } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { ShopHeader } from "@/components/shop-header";
 import { Card, StatusBadge, ErrorState } from "@/components/ui";
+import { OrderProgress } from "@/components/order-progress";
 import { apiFetch, getAccessToken, ApiError } from "@/lib/api";
 import type { MyOrderDetail } from "@/lib/types";
 
 export default function CustomerOrderDetailPage() {
   const { orgSlug, orderId } = useParams<{ orgSlug: string; orderId: string }>();
-  const loggedIn = typeof window !== "undefined" && !!getAccessToken();
+  // Read after mount so the server and the first browser render agree (sign-in state lives in the browser).
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  const loggedIn = mounted && !!getAccessToken();
 
   const orderQuery = useQuery<MyOrderDetail>({
     queryKey: ["my-order", orderId],
@@ -21,8 +28,11 @@ export default function CustomerOrderDetailPage() {
   return (
     <div className="min-h-screen bg-paper">
       <ShopHeader orgSlug={orgSlug} />
-      <main className="mx-auto max-w-2xl px-6 py-10">
-        {!loggedIn && <ErrorState message="Log in to view this order." />}
+      <main className="mx-auto max-w-2xl px-4 py-8 sm:px-6 sm:py-10">
+        <Link href={`/shop/${orgSlug}/account`} className="mb-4 inline-flex items-center gap-1.5 text-sm text-muted hover:text-forest">
+          <ArrowLeft className="h-4 w-4" aria-hidden /> Back to my account
+        </Link>
+        {mounted && !loggedIn && <ErrorState message="Log in to view this order." />}
         {orderQuery.error && (
           <ErrorState message={orderQuery.error instanceof ApiError ? orderQuery.error.message : "Failed to load order"} />
         )}
@@ -39,6 +49,11 @@ export default function CustomerOrderDetailPage() {
               </div>
               <StatusBadge status={orderQuery.data.status} />
             </div>
+
+            <Card className="mb-4">
+              <h2 className="mb-4 font-display text-lg text-forest">Order progress</h2>
+              <OrderProgress status={orderQuery.data.status} />
+            </Card>
 
             <Card className="mb-4">
               <h2 className="mb-3 font-display text-lg text-forest">Items</h2>
