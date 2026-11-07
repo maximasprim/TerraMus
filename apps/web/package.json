@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
-    "test:logic": "npx --yes tsx scripts/offline-queue.test.ts && npx --yes tsx scripts/weigh-rows.test.ts && npx --yes tsx scripts/tag-rows.test.ts && npx --yes tsx scripts/role-tabs.test.ts && npx --yes tsx scripts/cycle-scope.test.ts && npx --yes tsx scripts/offline-auth.test.ts && node scripts/sw.test.mjs",
+    "test:logic": "npx --yes tsx scripts/offline-queue.test.ts && npx --yes tsx scripts/weigh-rows.test.ts && npx --yes tsx scripts/tag-rows.test.ts && npx --yes tsx scripts/role-tabs.test.ts && npx --yes tsx scripts/livestock-list.test.ts && npx --yes tsx scripts/cycle-scope.test.ts && npx --yes tsx scripts/offline-auth.test.ts && node scripts/sw.test.mjs",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",

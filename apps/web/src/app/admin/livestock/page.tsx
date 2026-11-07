@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AdminShell } from "@/components/admin-shell";
 import { Can } from "@/components/can";
@@ -11,12 +11,15 @@ import { useCan } from "@/lib/use-auth";
 import { useCatalog } from "@/lib/use-catalog";
 import { ModuleDisabledNotice } from "@/components/module-disabled-notice";
 import { WeighDayForm, WeighQueueNotice } from "@/components/weigh-day-form";
+import { distinct, filterAnimals, nextSort, NO_FILTERS, sortAnimals, type Filters, type SortKey, type SortState } from "@/lib/livestock-list";
 import type { Animal, Farm, BulkImportResult } from "@/lib/types";
 
 export default function LivestockListPage() {
   const [importOpen, setImportOpen] = useState(false);
   const [weighOpen, setWeighOpen] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [filters, setFilters] = useState<Filters>(NO_FILTERS);
+  const [sort, setSort] = useState<SortState | null>(null);   // null = the order loaded (newest first)
   const can = useCan();
   const { data: catalog } = useCatalog();
   const moduleOff = catalog?.livestock_enabled === false;
@@ -29,6 +32,20 @@ export default function LivestockListPage() {
     queryKey: ["livestock"],
     queryFn: () => apiFetchAll<Animal>("/api/v1/livestock"),
   });
+
+  // Search, filters and sorting run in the browser on the animals already loaded.
+  const visible = useMemo(() => sortAnimals(filterAnimals(data ?? [], filters), sort), [data, filters, sort]);
+  const speciesOptions = useMemo(() => distinct(data ?? [], "species"), [data]);
+  const statusOptions = useMemo(() => distinct(data ?? [], "status"), [data]);
+  const filtering = filters.q.trim() !== "" || filters.species !== "" || filters.status !== "";
+  const sortTh = (k: SortKey, label: string) => (
+    <th key={k} className="px-4 py-3 font-medium" aria-sort={sort?.key === k ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}>
+      <button type="button" onClick={() => setSort((cur) => nextSort(cur, k))} className="inline-flex items-center gap-1 hover:underline">
+        {label}
+        <span aria-hidden className={sort?.key === k ? "" : "opacity-40"}>{sort?.key === k ? (sort.dir === "asc" ? "▲" : "▼") : "↕"}</span>
+      </button>
+    </th>
+  );
 
   return (
     <AdminShell>
@@ -62,20 +79,49 @@ export default function LivestockListPage() {
       )}
 
       {data && data.length > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <input
+            type="search" aria-label="Search animals" value={filters.q} placeholder="Search tag, ear tag, name, breed…"
+            onChange={(e) => setFilters({ ...filters, q: e.target.value })}
+            className="min-w-[12rem] flex-1 rounded-md border border-hairline bg-white px-3 py-2 text-sm focus:border-brass focus:outline-none"
+          />
+          <select aria-label="Filter by species" value={filters.species} onChange={(e) => setFilters({ ...filters, species: e.target.value })}
+            className="rounded-md border border-hairline bg-white px-3 py-2 text-sm capitalize">
+            <option value="">All species</option>
+            {speciesOptions.map((v) => <option key={v} value={v}>{v}</option>)}
+          </select>
+          <select aria-label="Filter by status" value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}
+            className="rounded-md border border-hairline bg-white px-3 py-2 text-sm capitalize">
+            <option value="">All statuses</option>
+            {statusOptions.map((v) => <option key={v} value={v}>{v.replace(/_/g, " ")}</option>)}
+          </select>
+          {(filtering || sort) && (
+            <Button variant="ghost" onClick={() => { setFilters(NO_FILTERS); setSort(null); }}>Clear</Button>
+          )}
+          <p className="w-full text-xs text-muted sm:ml-auto sm:w-auto" aria-live="polite">
+            {filtering ? `Showing ${visible.length} of ${data.length}` : `${data.length} animal${data.length === 1 ? "" : "s"}`}
+          </p>
+        </div>
+      )}
+      {data && data.length > 0 && visible.length === 0 && (
+        <EmptyState title="No animals match" body="Try a different search, or clear the filters." />
+      )}
+
+      {data && visible.length > 0 && (
         <div className="overflow-x-auto rounded-lg border border-hairline">
           <table className="w-full text-left text-sm">
             <thead className="bg-forest text-paper">
               <tr>
-                <th className="px-4 py-3 font-medium">ID</th>
-                <th className="px-4 py-3 font-medium">Species / Breed</th>
-                <th className="px-4 py-3 font-medium">Sex</th>
-                <th className="px-4 py-3 font-medium">Weight</th>
-                <th className="px-4 py-3 font-medium">Status</th>
-                <th className="px-4 py-3 font-medium">Health</th>
+                {sortTh("id", "ID")}
+                {sortTh("species", "Species / Breed")}
+                {sortTh("sex", "Sex")}
+                {sortTh("weight", "Weight")}
+                {sortTh("status", "Status")}
+                {sortTh("health", "Health")}
               </tr>
             </thead>
             <tbody>
-              {data.map((animal, i) => (
+              {visible.map((animal, i) => (
                 <tr
                   key={animal.id}
                   className={i % 2 === 0 ? "bg-white/40" : "bg-white/70"}

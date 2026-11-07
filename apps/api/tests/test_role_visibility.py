@@ -123,3 +123,42 @@ async def test_switches_are_per_organisation(client, engine):
     await client.put(f"/api/v1/roles/{ra['id']}", headers=ha, json={"permissions": ["livestock.read"]})
     rb = (await _roles(client, hb))["Field Recorder"]
     assert set(VISIBILITY_PERMISSIONS) <= set(rb["permissions"])
+
+
+# ---------------------------------------------------------------- Listings has its own switch (migration 0046)
+async def test_listings_switch_is_defaulted_only_to_roles_that_could_already_open_listings(client, engine):
+    h = await _owner(client, "Vis Farm L1", "visl1@example.com")
+    roles = await _roles(client, h)
+    for name, role in roles.items():
+        has_read = "livestock.read" in role["permissions"]
+        assert ("listings.view" in role["permissions"]) == has_read, name       # nobody gains or loses Listings
+    assert "listings.view" in roles["Farm Worker"]["permissions"] and "listings.view" not in roles["Accountant"]["permissions"]
+
+
+async def test_listings_and_livestock_can_be_enabled_independently(client, engine):
+    h = await _owner(client, "Vis Farm L2", "visl2@example.com")
+    roles = await _roles(client, h)
+    # a custom role with Listings but NOT Livestock: the listings list loads, the livestock list does not
+    r = await client.post("/api/v1/roles", headers=h, json={"name": "Shop only", "permissions": ["listings.view"]})
+    assert r.status_code == 201, r.text
+    shop_role = r.json()["id"]
+    shop = await _staff(client, h, shop_role, "shop-l2@example.com")
+    assert (await client.get("/api/v1/listings", headers=shop)).status_code == 200
+    assert (await client.get("/api/v1/listings/low-stock", headers=shop)).status_code == 200
+    assert (await client.get("/api/v1/livestock", headers=shop)).status_code == 403
+    perms = await _my_perms(client, shop)
+    assert "listings.view" in perms and "livestock.read" not in perms
+    # ... and the other way round: Livestock without Listings keeps API access (the Reviews page depends on it),
+    # while its page switch is off
+    r = await client.put(f"/api/v1/roles/{shop_role}", headers=h, json={"permissions": ["livestock.read"]})
+    assert r.status_code == 200, r.text
+    perms = await _my_perms(client, shop)
+    assert "livestock.read" in perms and "listings.view" not in perms
+    assert (await client.get("/api/v1/livestock", headers=shop)).status_code == 200
+    assert (await client.get("/api/v1/listings", headers=shop)).status_code == 200
+
+
+async def test_roles_catalog_lists_the_listings_switch(client, engine):
+    h = await _owner(client, "Vis Farm L3", "visl3@example.com")
+    cat = (await client.get("/api/v1/roles/catalog", headers=h)).json()
+    assert "listings.view" in {p["code"] for p in cat["permissions"]} and "listings.view" in cat["can_grant"]

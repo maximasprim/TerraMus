@@ -58,11 +58,18 @@ PERMISSIONS: list[tuple[str, str]] = [
     ("animaltabs.movements", "Show the Movements tab on an animal's page"),
     ("animaltabs.breeding", "Show the Breeding tab on an animal's page"),
     ("animaltabs.dairy", "Show the Dairy tab on an animal's page"),
+    # The Listings page used to open with livestock.read. It now has its own switch so the owner can enable Listings
+    # without Livestock, or the other way round. Roles that hold livestock.read start with it (migration 0046).
+    ("listings.view", "Open the Listings page"),
 ]
 
 # The visibility switches above. Every staff role starts with ALL of them on, so nothing disappears for anyone until
 # the farm owner unticks it. (Keep in step with migration 0045.)
-VISIBILITY_PERMISSIONS: list[str] = [code for code, _ in PERMISSIONS[-7:]]
+VISIBILITY_PERMISSIONS: list[str] = [
+    code for code, _ in PERMISSIONS if code == "notifications.view" or code.startswith("animaltabs.")
+]
+# Granted only to roles that could already open Listings (those holding livestock.read), so nobody gains or loses it.
+LISTINGS_VIEW = "listings.view"
 
 # Default role -> permission grants used by org bootstrap/seed data (spec §5, §61).
 DEFAULT_ROLE_GRANTS: dict[str, list[str]] = {
@@ -144,3 +151,5 @@ for _role_name, _grants in DEFAULT_ROLE_GRANTS.items():
     # Farm Owner already holds every code; Customer is the storefront account role and sees no admin screens.
     if _role_name not in ("Farm Owner", "Customer"):
         _grants.extend(c for c in VISIBILITY_PERMISSIONS if c not in _grants)
+        if "livestock.read" in _grants and LISTINGS_VIEW not in _grants:
+            _grants.append(LISTINGS_VIEW)

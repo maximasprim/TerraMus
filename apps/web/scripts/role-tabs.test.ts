@@ -15,4 +15,8 @@ ok(!canAccessPath(["livestock.read"], "/admin/notifications"), "notifications cl
 ok(canAccessPath(undefined, "/admin/notifications"), "fails open while loading");
 ok(canAccessPath(["livestock.read"], "/admin/livestock"), "other sections unchanged");
 
+// Listings has its own switch, separate from Livestock
+ok(canAccessPath(["listings.view"], "/admin/listings") && !canAccessPath(["listings.view"], "/admin/livestock"), "Listings without Livestock");
+ok(canAccessPath(["livestock.read"], "/admin/livestock") && !canAccessPath(["livestock.read"], "/admin/listings"), "Livestock without Listings");
+
 console.log(`role-tabs tests: ${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);

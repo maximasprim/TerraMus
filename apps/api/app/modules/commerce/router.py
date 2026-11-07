@@ -6,7 +6,7 @@ from fastapi.responses import RedirectResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.modules.identity.deps import require_permission
+from app.modules.identity.deps import require_any_permission, require_permission
 from app.modules.identity.models import User
 from app.modules.commerce import image_service, schemas, service
 
@@ -22,7 +22,7 @@ async def list_listings(
     min_price: Decimal | None = Query(None),
     max_price: Decimal | None = Query(None),
     featured_only: bool = Query(False),
-    user: User = Depends(require_permission("livestock.read")),
+    user: User = Depends(require_any_permission("livestock.read", "listings.view")),
     db: AsyncSession = Depends(get_db),
 ):
     filters = schemas.ListingFilter(
@@ -44,7 +44,7 @@ async def create_listing(
 
 @listings_router.get("/low-stock")
 async def low_stock_crop_listings(
-    user: User = Depends(require_permission("livestock.read")),
+    user: User = Depends(require_any_permission("livestock.read", "listings.view")),
     db: AsyncSession = Depends(get_db),
 ):
     """Crop-produce listings that have a low_stock_threshold set and have
@@ -57,7 +57,7 @@ async def low_stock_crop_listings(
 @listings_router.get("/{listing_id}", response_model=schemas.ListingOut)
 async def get_listing(
     listing_id: uuid.UUID,
-    user: User = Depends(require_permission("livestock.read")),
+    user: User = Depends(require_any_permission("livestock.read", "listings.view")),
     db: AsyncSession = Depends(get_db),
 ):
     return await service.get_listing(db, user.organization_id, listing_id)
@@ -169,7 +169,7 @@ async def change_order_status(
 @listings_router.get("/{listing_id}/images", response_model=list[schemas.ListingImageOut])
 async def list_listing_images(
     listing_id: uuid.UUID,
-    user: User = Depends(require_permission("livestock.read")),
+    user: User = Depends(require_any_permission("livestock.read", "listings.view")),
     db: AsyncSession = Depends(get_db),
 ):
     return await image_service.list_images(db, user.organization_id, listing_id)
