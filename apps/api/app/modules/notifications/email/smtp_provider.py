@@ -8,6 +8,7 @@ built-in login()) follows the standard SMTP-with-auth pattern any provider
 (SES, SendGrid SMTP relay, Gmail, a real mail server) expects, but it has
 not been exercised against a real server as part of this build. Treat it
 as a correctly-shaped starting point, not verified working code."""
+import asyncio
 import smtplib
 import ssl
 from email.mime.text import MIMEText
@@ -22,16 +23,16 @@ class SMTPEmailProvider(EmailProvider):
     name = "smtp"
 
     async def send(self, to: str, subject: str, body_text: str) -> EmailSendResult:
-        # smtplib is synchronous - this runs it directly rather than wrapping
-        # in a thread pool executor. Acceptable here because email sends are
-        # already fire-and-forget from a background event handler (same
-        # "own session, own task" pattern as notifications/handlers.py), not
-        # on the hot path of a request a user is waiting on.
         message = MIMEText(body_text)
         message["Subject"] = subject
         message["From"] = settings.SMTP_FROM_EMAIL
         message["To"] = to
+        # smtplib blocks, so run it in a worker thread: a slow mail server must not freeze every other request.
+        await asyncio.to_thread(self._deliver, to, message.as_string())
+        return EmailSendResult(provider=self.name, accepted=True)
 
+    @staticmethod
+    def _deliver(to: str, raw_message: str) -> None:
         # Port 465 is "implicit TLS" (encrypted from the first byte); every other port starts plain and upgrades
         # with STARTTLS when SMTP_USE_TLS is on (587, the default).
         if settings.SMTP_PORT == 465:
@@ -43,6 +44,4 @@ class SMTPEmailProvider(EmailProvider):
                 client.starttls()
             if settings.SMTP_USERNAME:
                 client.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
-            client.sendmail(settings.SMTP_FROM_EMAIL, [to], message.as_string())
-
-        return EmailSendResult(provider=self.name, accepted=True)
+            client.sendmail(settings.SMTP_FROM_EMAIL, [to], raw_message)

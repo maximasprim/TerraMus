@@ -1,4 +1,5 @@
 import logging
+import logging
 import os
 import re
 import time
@@ -549,15 +550,20 @@ async def request_password_reset(db: AsyncSession, email: str) -> None:
     from app.modules.notifications.service import send_email
     settings = get_settings()
     reset_link = f"{settings.PUBLIC_SITE_BASE_URL}/reset-password?token={raw_token}"
-    await send_email(
-        db, to=user.email, subject="Reset your password",
-        body_text=(
-            f"Someone requested a password reset for this account. If this was you, "
-            f"use this link within {settings.PASSWORD_RESET_TOKEN_EXPIRE_MINUTES} minutes:\n\n{reset_link}\n\n"
-            f"If you didn't request this, you can ignore this email."
-        ),
-        organization_id=user.organization_id, related_user_id=user.id,
-    )
+    try:
+        await send_email(
+            db, to=user.email, subject="Reset your password",
+            body_text=(
+                f"Someone requested a password reset for this account. If this was you, "
+                f"use this link within {settings.PASSWORD_RESET_TOKEN_EXPIRE_MINUTES} minutes:\n\n{reset_link}\n\n"
+                f"If you didn't request this, you can ignore this email."
+            ),
+            organization_id=user.organization_id, related_user_id=user.id,
+        )
+    except Exception:
+        # A mail-server problem must not turn into a 500: that would also reveal which emails are registered
+        # (only real accounts would fail). The failed attempt is already recorded in the email outbox.
+        logging.getLogger(__name__).exception("password reset email could not be sent")
 
 
 async def confirm_password_reset(db: AsyncSession, raw_token: str, new_password: str) -> None:
