@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     DEFAULT_CURRENCY: str = "KES"
     DEFAULT_TIMEZONE: str = "Africa/Nairobi"
 
-    CORS_ORIGINS: list[str] = ["http://localhost:3000"]
+    CORS_ORIGINS: list[str] = ["http://localhost:3000", "https://terra-mus.vercel.app"]
 
     # Spec §38 QR codes: the URL a scanned code resolves to. The frontend's
     # own dev-server default - a real deployment must override this to its
