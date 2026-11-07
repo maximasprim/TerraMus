@@ -41,11 +41,29 @@ def decode_token(token: str) -> dict[str, Any]:
         raise ValueError("invalid_token") from exc
 
 
+MIN_IDLE_TIMEOUT_MINUTES = 20
+
+
+def idle_timeout_minutes() -> int:
+    """Minutes of inactivity after which a login ends; 0 = no inactivity limit. A set value is never below
+    MIN_IDLE_TIMEOUT_MINUTES (the access token outlives the last request by up to 15 minutes anyway)."""
+    configured = int(settings.SESSION_IDLE_TIMEOUT_MINUTES or 0)
+    return 0 if configured <= 0 else max(configured, MIN_IDLE_TIMEOUT_MINUTES)
+
+
+def refresh_token_lifetime() -> timedelta:
+    """How long a freshly issued refresh token stays usable. Every renewal issues a new one, so this is a SLIDING
+    window: with an inactivity limit set, a login that is not renewed within it cannot be renewed afterwards."""
+    cap = timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+    idle = idle_timeout_minutes()
+    return min(cap, timedelta(minutes=idle)) if idle else cap
+
+
 def generate_refresh_token() -> tuple[str, str, datetime]:
     """Returns (raw_token, token_hash, expires_at). Only the hash is stored."""
     raw = secrets.token_urlsafe(48)
     token_hash = hashlib.sha256(raw.encode()).hexdigest()
-    expires_at = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+    expires_at = datetime.now(timezone.utc) + refresh_token_lifetime()
     return raw, token_hash, expires_at
 
 

@@ -9,6 +9,7 @@ built-in login()) follows the standard SMTP-with-auth pattern any provider
 not been exercised against a real server as part of this build. Treat it
 as a correctly-shaped starting point, not verified working code."""
 import smtplib
+import ssl
 from email.mime.text import MIMEText
 
 from app.core.config import get_settings
@@ -31,8 +32,14 @@ class SMTPEmailProvider(EmailProvider):
         message["From"] = settings.SMTP_FROM_EMAIL
         message["To"] = to
 
-        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=10) as client:
-            if settings.SMTP_USE_TLS:
+        # Port 465 is "implicit TLS" (encrypted from the first byte); every other port starts plain and upgrades
+        # with STARTTLS when SMTP_USE_TLS is on (587, the default).
+        if settings.SMTP_PORT == 465:
+            client_cm = smtplib.SMTP_SSL(settings.SMTP_HOST, settings.SMTP_PORT, timeout=10, context=ssl.create_default_context())
+        else:
+            client_cm = smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=10)
+        with client_cm as client:
+            if settings.SMTP_PORT != 465 and settings.SMTP_USE_TLS:
                 client.starttls()
             if settings.SMTP_USERNAME:
                 client.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)

@@ -56,7 +56,7 @@ export default function CustomerLoginPage() {
               {pending ? "Logging in…" : "Log in"}
             </Button>
             <p className="text-center text-sm">
-              <Link href="/reset-password" className="text-forest hover:underline">
+              <Link href={`/reset-password?shop=${orgSlug}`} className="text-forest hover:underline">
                 Forgot your password?
               </Link>
             </p>

@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useLogin } from "@/lib/use-auth";
-import { ApiError } from "@/lib/api";
+import { ApiError, SIGNOUT_REASON_KEY } from "@/lib/api";
+import { idleMessage } from "@/lib/idle";
 import { Button, ErrorState } from "@/components/ui";
 
 export default function LoginPage() {
@@ -11,6 +12,16 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      const why = sessionStorage.getItem(SIGNOUT_REASON_KEY);
+      if (!why) return;
+      sessionStorage.removeItem(SIGNOUT_REASON_KEY);
+      setNotice(why.startsWith("idle:") ? idleMessage(Number(why.slice(5)) || 60) : "Your session ended. Please sign in again.");
+    } catch { /* ignore */ }
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -33,6 +44,7 @@ export default function LoginPage() {
           <p className="mt-1 text-sm text-muted">Sign in to manage your operation</p>
         </div>
         <form onSubmit={handleSubmit} className="space-y-4 rounded-lg border border-hairline bg-white/60 p-6">
+          {notice && !error && <p role="status" className="rounded-md border border-hairline bg-paper px-3 py-2 text-sm text-ink">{notice}</p>}
           {error && <ErrorState message={error} />}
           <div>
             <label htmlFor="email" className="mb-1 block text-sm font-medium text-ink">

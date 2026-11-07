@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
     PASSWORD_RESET_TOKEN_EXPIRE_MINUTES: int = 60
+    # Sign people out after this many minutes with no activity (0 = off: the old 30-day sliding login). Enforced on
+    # the server: a login that has not been renewed within this time cannot be renewed any more. Values below
+    # 20 are raised to 20, because a 15-minute access token is still valid after the last request.
+    SESSION_IDLE_TIMEOUT_MINUTES: int = 60
 
     DEFAULT_CURRENCY: str = "KES"
     DEFAULT_TIMEZONE: str = "Africa/Nairobi"

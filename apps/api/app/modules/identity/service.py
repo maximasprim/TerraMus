@@ -3,7 +3,7 @@ import os
 import re
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, select, update
@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.security import (
-    hash_password, verify_password, generate_refresh_token, hash_refresh_token, generate_password_reset_token,
+    hash_password, verify_password, generate_refresh_token, hash_refresh_token, idle_timeout_minutes, generate_password_reset_token,
 )
 from app.modules.identity.models import (
     Organization, User, Role, Permission, RefreshToken, PasswordResetToken, role_permissions, user_roles, AuditLog,
@@ -307,7 +307,13 @@ async def rotate_refresh_token(db: AsyncSession, raw_token: str) -> tuple[User, 
     token_hash = hash_refresh_token(raw_token)
     result = await db.execute(select(RefreshToken).where(RefreshToken.token_hash == token_hash))
     token = result.scalar_one_or_none()
-    if not token or token.revoked or token.expires_at < datetime.now(timezone.utc):
+    now = datetime.now(timezone.utc)
+    if not token or token.revoked or token.expires_at < now:
+        return None
+    idle = idle_timeout_minutes()
+    if idle and token.created_at is not None and now - token.created_at > timedelta(minutes=idle):
+        # Not renewed within the inactivity limit - including a login issued before the limit existed (those carry
+        # the old 30-day expiry). The person signs in again.
         return None
     token.revoked = True
     user_result = await db.execute(

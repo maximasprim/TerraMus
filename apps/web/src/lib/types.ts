@@ -23,6 +23,7 @@ export interface MeResponse {
   user: UserMe;
   organization: Organization;
   permissions: string[];
+  idle_timeout_minutes?: number;   // 0 / missing = no inactivity sign-out
 }
 
 export interface TokenPair {

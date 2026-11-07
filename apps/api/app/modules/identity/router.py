@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
-from app.core.security import create_access_token
+from app.core.security import create_access_token, idle_timeout_minutes
 from app.core.middleware import rate_limit_auth
 from app.modules.identity import schemas, service
 from app.modules.identity.deps import get_current_user, require_permission
@@ -67,6 +67,8 @@ async def me(user: User = Depends(get_current_user), db: AsyncSession = Depends(
         user=schemas.UserOut.model_validate(user),
         organization=schemas.OrganizationOut.model_validate(org),
         permissions=sorted(perms),
+        # a superadmin's workspace session has its own 2-hour limit and no refresh token, so no inactivity timer
+        idle_timeout_minutes=0 if getattr(user, "impersonated_by", None) else idle_timeout_minutes(),
     )
 
 

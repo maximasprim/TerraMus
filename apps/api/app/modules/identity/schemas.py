@@ -84,6 +84,8 @@ class MeResponse(BaseModel):
     user: UserOut
     organization: OrganizationOut
     permissions: list[str]
+    # Minutes of inactivity after which this login ends (0 = no limit). The web app uses it to sign out and to warn.
+    idle_timeout_minutes: int = 0
 
 
 class CreateUserRequest(BaseModel):

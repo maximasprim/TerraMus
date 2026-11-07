@@ -50,6 +50,10 @@ export function useRequireAuth() {
       router.replace("/login");
       return;
     }
+    if (isCustomerOnly(meQuery.data) && meQuery.data && !getWorkspaceSession()) {
+      router.replace(`/shop/${meQuery.data.organization.slug}/account`);
+      return;
+    }
     if (meQuery.isError) {
       // A lost connection is not a lost session: never sign the user out because the network is down.
       if (isNetworkFailure(meQuery.error)) return;
@@ -86,10 +90,26 @@ export function useLogin() {
       });
       setTokens(tokens.access_token, tokens.refresh_token);
       await queryClient.invalidateQueries({ queryKey: ["me"] });
-      router.push("/admin/dashboard");
+      // A storefront customer has no admin screens: send them to their shop account, not the staff dashboard.
+      const me = await customerHome(queryClient);
+      router.push(me ?? "/admin/dashboard");
     },
     [queryClient, router],
   );
+}
+
+/** The shop-account address for a customer-only login, or null for staff (or if it can't be told). */
+async function customerHome(queryClient: ReturnType<typeof useQueryClient>): Promise<string | null> {
+  try {
+    const me = await queryClient.fetchQuery({ queryKey: ["me"], queryFn: () => apiFetch<MeResponse>("/api/v1/auth/me"), staleTime: 60_000 });
+    return isCustomerOnly(me) ? `/shop/${me.organization.slug}/account` : null;
+  } catch {
+    return null;
+  }
+}
+
+export function isCustomerOnly(me: MeResponse | undefined): boolean {
+  return !!me && me.user.roles.length > 0 && me.user.roles.every((r) => r.name === "Customer");
 }
 
 /** Spec §1/§64: register a brand-new organization (tenant) and its owner

@@ -14,6 +14,8 @@ import { apiFetch, ApiError } from "@/lib/api";
  * (POST /api/v1/auth/password-reset/*) doesn't distinguish between them
  * (see apps/api's docs/architecture.md Phase 15 note on why a customer
  * account is just an ordinary User), so there's no reason for two pages. */
+const SHOP_KEY = "farm.reset_shop";
+
 export default function ResetPasswordPage() {
   return (
     // useSearchParams() opts a page out of static rendering unless it's
@@ -29,6 +31,10 @@ export default function ResetPasswordPage() {
 function ResetPasswordContent() {
   const searchParams = useSearchParams();
   const token = searchParams.get("token");
+  // A customer who came from a shop's login page is sent back to that shop's login afterwards (remembered in this
+  // browser, because the emailed link opens in a fresh page).
+  const shop = searchParams.get("shop");
+  if (shop && /^[a-z0-9-]+$/i.test(shop)) { try { localStorage.setItem(SHOP_KEY, shop); } catch { /* ignore */ } }
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-paper px-4">
@@ -90,6 +96,13 @@ function RequestForm() {
   );
 }
 
+function signInHref(): string {
+  try {
+    const shop = localStorage.getItem(SHOP_KEY);
+    return shop ? `/shop/${shop}/account/login` : "/login";
+  } catch { return "/login"; }
+}
+
 function ConfirmForm({ token }: { token: string }) {
   const [password, setPassword] = useState("");
   const [done, setDone] = useState(false);
@@ -100,7 +113,7 @@ function ConfirmForm({ token }: { token: string }) {
     return (
       <div className="space-y-4 rounded-lg border border-hairline bg-white/60 p-6 text-sm">
         <p className="text-ink">Password updated. You can now log in with your new password.</p>
-        <Link href="/login">
+        <Link href={signInHref()}>
           <Button className="w-full">Go to sign in</Button>
         </Link>
       </div>

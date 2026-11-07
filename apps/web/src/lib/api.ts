@@ -35,6 +35,9 @@ export function setTokens(access: string, refresh: string) {
   localStorage.setItem(REFRESH_KEY, refresh);
 }
 
+/** Why the user landed on the login page (read once by /login): "idle:60" or "expired". */
+export const SIGNOUT_REASON_KEY = "farm.signout_reason";
+
 export function clearTokens() {
   localStorage.removeItem(ACCESS_KEY);
   localStorage.removeItem(REFRESH_KEY);
@@ -116,12 +119,18 @@ async function performRefresh(): Promise<string | null> {
     body: JSON.stringify({ refresh_token }),
   });
   if (!resp.ok) {
+    if (resp.status === 401) { try { sessionStorage.setItem(SIGNOUT_REASON_KEY, "expired"); } catch { /* ignore */ } }
     clearTokens();
     return null;
   }
   const data = await resp.json();
   setTokens(data.access_token, data.refresh_token);
   return data.access_token as string;
+}
+
+/** Renews the login while the user is active (used by the inactivity timer). Failures are ignored here. */
+export async function keepSessionAlive(): Promise<void> {
+  try { await refreshAccessToken(); } catch { /* offline etc: the next real request retries */ }
 }
 
 export async function apiFetch<T>(

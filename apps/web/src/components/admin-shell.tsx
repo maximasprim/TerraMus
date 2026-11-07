@@ -1,11 +1,12 @@
 "use client";
 
+import { useIdleLogout } from "@/lib/use-idle-logout";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createContext, useContext, useEffect } from "react";
 import { clsx } from "clsx";
 import { LayoutDashboard, BarChart3, Beef, Sprout, LogOut, MapPin, Users, Wheat, ShoppingCart, Tag, Package, Wallet, Truck, UserCog, Wrench, Search, Settings, UsersRound, CalendarClock, Bell, Newspaper, CreditCard, ExternalLink, Inbox, History, Bird, Scale, Receipt, Fuel, GraduationCap, Star, Layers } from "lucide-react";
-import { useRequireAuth, useLogout } from "@/lib/use-auth";
+import { useRequireAuth, useLogout, isCustomerOnly } from "@/lib/use-auth";
 import { canAccessPath, firstAccessiblePath } from "@/lib/permissions";
 import { useCatalog } from "@/lib/use-catalog";
 import { ShellFrame } from "@/components/shell-frame";
@@ -67,6 +68,7 @@ function AdminShellFrame({ children }: { children: React.ReactNode }) {
     if (isWorkspaceSession()) return false;   // a superadmin sees every menu, including ones hidden for the tenant
     return hiddenMenus.some((m) => path === m || path.startsWith(m + "/"));
   }
+  const idleLeft = useIdleLogout(me?.idle_timeout_minutes);
   const pathname = usePathname();
   const router = useRouter();
   const pageHidden = menuHidden(pathname);
@@ -75,7 +77,7 @@ function AdminShellFrame({ children }: { children: React.ReactNode }) {
   // /auth/me has loaded, in which case everything is allowed - fail open.
   const permissions = me?.permissions;
   const allowed = canAccessPath(permissions, pathname);
-  const sendToLanding = !allowed && pathname === "/admin/dashboard";
+  const sendToLanding = !allowed && pathname === "/admin/dashboard" && !isCustomerOnly(me);   // customers are sent to their shop by useRequireAuth
   useEffect(() => {
     // Roles without dashboard access (e.g. Farm Worker) are routed to the first page they can use.
     if (sendToLanding) router.replace(firstAccessiblePath(permissions));
@@ -137,6 +139,11 @@ function AdminShellFrame({ children }: { children: React.ReactNode }) {
       }
     >
       <ImpersonationBanner />
+      {idleLeft !== null && (
+        <div role="alert" className="mb-2 rounded-md border border-brass bg-yellow-50 px-3 py-2 text-sm text-ink">
+          You will be signed out in {Math.floor(idleLeft / 60)}:{String(idleLeft % 60).padStart(2, "0")} because of inactivity. Click or press any key to stay signed in.
+        </div>
+      )}
       {pageHidden ? (
         <div className="mx-auto mt-16 max-w-md rounded-lg border border-hairline bg-white p-8 text-center">
           <h1 className="font-display text-xl text-forest">This section isn&apos;t available</h1>
