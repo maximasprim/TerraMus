@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AdminShell } from "@/components/admin-shell";
@@ -8,6 +9,8 @@ import { EditEntityModal } from "@/components/edit-entity-modal";
 import { useCan } from "@/lib/use-auth";
 import { Card, StatusBadge, ErrorState, Button, Input } from "@/components/ui";
 import { apiFetch, ApiError } from "@/lib/api";
+import { LoginAccountSelect } from "@/components/login-account-select";
+import { useLoginAccounts, LOGIN_ACCOUNTS_KEY } from "@/lib/use-login-accounts";
 import type { EmployeeDetail, WorkShift } from "@/lib/types";
 
 const STATUS_TRANSITIONS: Record<string, string[]> = {
@@ -27,6 +30,8 @@ export default function EmployeeDetailPage() {
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
   const [shiftError, setShiftError] = useState<string | null>(null);
+  const [pickedAccount, setPickedAccount] = useState<string | null>(null);   // null = not touched yet
+  const [accountError, setAccountError] = useState<string | null>(null);
 
   const employeeQuery = useQuery<EmployeeDetail>({
     queryKey: ["employee", id],
@@ -35,6 +40,21 @@ export default function EmployeeDetailPage() {
   const shiftsQuery = useQuery<WorkShift[]>({
     queryKey: ["employee-shifts", id],
     queryFn: () => apiFetch<WorkShift[]>(`/api/v1/employees/${id}/shifts`),
+  });
+
+  const accountsQuery = useLoginAccounts(can("employees.manage"));
+
+  const linkAccount = useMutation({
+    mutationFn: (userId: string | null) =>
+      apiFetch(`/api/v1/employees/${id}`, { method: "PATCH", body: JSON.stringify({ user_id: userId }) }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["employee", id] });
+      queryClient.invalidateQueries({ queryKey: ["employees"] });
+      queryClient.invalidateQueries({ queryKey: LOGIN_ACCOUNTS_KEY });
+      setPickedAccount(null);
+      setAccountError(null);
+    },
+    onError: (err) => setAccountError(err instanceof ApiError ? err.message : "Failed to update the login account"),
   });
 
   const changeStatus = useMutation({
@@ -85,6 +105,11 @@ export default function EmployeeDetailPage() {
 
   const employee = employeeQuery.data;
   const nextStatuses = STATUS_TRANSITIONS[employee.employment_status] ?? [];
+  const accounts = accountsQuery.data ?? [];
+  const linkedAccount = accounts.find((a) => a.id === employee.user_id);
+  const selectedAccount = pickedAccount ?? employee.user_id ?? "";
+  const leftButStillActive =
+    !!linkedAccount?.is_active && (employee.employment_status === "terminated" || employee.employment_status === "suspended");
 
   return (
     <AdminShell>
@@ -118,6 +143,57 @@ export default function EmployeeDetailPage() {
       {statusError && <div className="mb-4"><ErrorState message={statusError} /></div>}
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <Card className="md:col-span-2">
+          <h2 className="mb-3 font-display text-lg text-forest">Login account</h2>
+          {employee.user_id ? (
+            <p className="mb-3 text-sm text-ink">
+              {linkedAccount ? (
+                <>
+                  Signs in as <span className="font-medium">{linkedAccount.email}</span>
+                  {linkedAccount.is_active ? "" : " (account is inactive)"}
+                </>
+              ) : (
+                "Linked to a login account."
+              )}
+              {can("users.manage") && (
+                <>
+                  {" "}
+                  <Link href="/admin/users" className="text-forest hover:underline">Manage on the Team page</Link>
+                </>
+              )}
+            </p>
+          ) : (
+            <p className="mb-3 text-sm text-muted">No login account. Link one so this person&apos;s employment and sign-in stay together.</p>
+          )}
+          {leftButStillActive && (
+            <div className="mb-3 rounded-md border border-clay/40 bg-clay/5 px-3 py-2 text-sm text-clay">
+              This person is {employee.employment_status}, but their login account is still active. Switch the account off
+              on the Team page (Edit details) so they can no longer sign in.
+            </div>
+          )}
+          {accountError && <div className="mb-2"><ErrorState message={accountError} /></div>}
+          {can("employees.manage") && (
+            <form
+              onSubmit={(e) => { e.preventDefault(); linkAccount.mutate(selectedAccount || null); }}
+              className="flex flex-col gap-2 sm:flex-row sm:items-end"
+            >
+              <div className="flex-1">
+                <LoginAccountSelect
+                  id="emp-detail-login"
+                  label="Linked login account"
+                  accounts={accounts}
+                  value={selectedAccount}
+                  currentEmployeeId={employee.id}
+                  onChange={setPickedAccount}
+                />
+              </div>
+              <Button type="submit" disabled={linkAccount.isPending || selectedAccount === (employee.user_id ?? "")} className="text-xs">
+                {linkAccount.isPending ? "Saving…" : "Save"}
+              </Button>
+            </form>
+          )}
+        </Card>
+
         <Card>
           <h2 className="mb-3 font-display text-lg text-forest">Status history</h2>
           {employee.status_history.length === 0 ? (

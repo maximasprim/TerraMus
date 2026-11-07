@@ -45,7 +45,7 @@ export const SECTION_PERMISSIONS: SectionPermission[] = [
   { prefix: "/admin/inquiries", permission: "orders.manage" },
   { prefix: "/admin/cms", permission: "cms.manage" },
   { prefix: "/admin/reviews", permission: "cms.manage" },
-  { prefix: "/admin/notifications", permission: null },
+  { prefix: "/admin/notifications", permission: "notifications.view" },
   { prefix: "/admin/audit", permission: "audit.view" },
   { prefix: "/admin/users", permission: "users.manage" },
   { prefix: "/admin/search", permission: "search.use" },
@@ -80,11 +80,30 @@ export function canAccessPath(permissions: string[] | undefined, pathname: strin
   return hasPermission(permissions, requiredPermission(pathname));
 }
 
-/** First sidebar section this user may open (always exists: Notifications and
- * Billing need no permission). Used as the landing page for roles that can't
- * see the dashboard. */
+/** First sidebar section this user may open. Used as the landing page for roles that can't see the dashboard.
+ * Falls back to Notifications when nothing else is open (it is only a landing page: a role the farm owner has
+ * switched Notifications off for is shown the "no access" notice there, never a redirect loop). */
 export function firstAccessiblePath(permissions: string[] | undefined): string {
   // top-level sections only - a "/new" form is never a sensible landing page
   const found = SECTION_PERMISSIONS.find((s) => s.prefix.split("/").length === 3 && hasPermission(permissions, s.permission));
   return found ? found.prefix : "/admin/notifications";
+}
+
+/** The tabs on an animal's page that the farm owner can switch on or off per role (Team > Roles).
+ * "Overview" is always shown, so it has no entry. These are display switches only: what a person may do on a tab
+ * is still decided by the permissions behind it. Keep the codes in step with identity/permissions.py. */
+export const ANIMAL_TAB_PERMISSIONS: Record<string, string> = {
+  Timeline: "animaltabs.timeline",
+  Health: "animaltabs.health",
+  Weights: "animaltabs.weights",
+  Movements: "animaltabs.movements",
+  Breeding: "animaltabs.breeding",
+  Dairy: "animaltabs.dairy",
+};
+
+/** Whether this user's role shows `tab`. Tabs with no switch (Overview) are always shown; until /auth/me has
+ * loaded everything is shown (fail open, same as every other check here). */
+export function roleShowsTab(permissions: string[] | undefined, tab: string): boolean {
+  const code = ANIMAL_TAB_PERMISSIONS[tab];
+  return code === undefined ? true : hasPermission(permissions, code);
 }

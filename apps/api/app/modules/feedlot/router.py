@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.modules.feedlot import schemas, service
-from app.modules.identity.deps import require_permission
+from app.modules.identity.deps import require_any_permission, require_permission
 from app.modules.identity.models import User
 from app.modules.cycles.deps import CycleSel, cycle_filter
 
@@ -21,7 +21,7 @@ async def list_intake_batches(user: User = Depends(require_permission("feedlot.r
 
 
 @router.post("/intake-batches", response_model=schemas.IntakeBatchOut, status_code=201)
-async def create_intake_batch(req: schemas.IntakeBatchCreate, user: User = Depends(require_permission("feedlot.manage")),
+async def create_intake_batch(req: schemas.IntakeBatchCreate, user: User = Depends(require_any_permission("feedlot.intake", "feedlot.manage")),
                               db: AsyncSession = Depends(get_db)):
     return await service.create_intake_batch(db, user.organization_id, req)
 
@@ -40,14 +40,14 @@ async def delete_intake_batch(batch_id: uuid.UUID, user: User = Depends(require_
 
 @router.post("/intake-batches/{batch_id}/animals", status_code=201)
 async def register_animals(batch_id: uuid.UUID, req: schemas.RegisterAnimalsRequest,
-                           user: User = Depends(require_permission("feedlot.manage")), db: AsyncSession = Depends(get_db)):
+                           user: User = Depends(require_any_permission("feedlot.intake", "feedlot.manage")), db: AsyncSession = Depends(get_db)):
     batch = await service.get_intake_batch(db, user.organization_id, batch_id)
     return await service.register_batch_animals(db, user.organization_id, user.id, batch, req)
 
 
 @router.post("/intake-batches/{batch_id}/link")
 async def link_animals(batch_id: uuid.UUID, req: schemas.LinkExistingRequest,
-                       user: User = Depends(require_permission("feedlot.manage")), db: AsyncSession = Depends(get_db)):
+                       user: User = Depends(require_any_permission("feedlot.intake", "feedlot.manage")), db: AsyncSession = Depends(get_db)):
     batch = await service.get_intake_batch(db, user.organization_id, batch_id)
     return await service.link_existing_animals(db, user.organization_id, batch, req)
 

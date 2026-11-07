@@ -10,10 +10,12 @@ import { ApiError, apiDownload, apiFetch, apiFetchAll, apiUpload } from "@/lib/a
 import { useCan } from "@/lib/use-auth";
 import { useCatalog } from "@/lib/use-catalog";
 import { ModuleDisabledNotice } from "@/components/module-disabled-notice";
+import { WeighDayForm, WeighQueueNotice } from "@/components/weigh-day-form";
 import type { Animal, Farm, BulkImportResult } from "@/lib/types";
 
 export default function LivestockListPage() {
   const [importOpen, setImportOpen] = useState(false);
+  const [weighOpen, setWeighOpen] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const can = useCan();
   const { data: catalog } = useCatalog();
@@ -30,12 +32,13 @@ export default function LivestockListPage() {
 
   return (
     <AdminShell>
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="font-display text-2xl text-forest">Livestock</h1>
           <p className="text-sm text-muted">Every animal currently on record.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          {!moduleOff && <Can permission="feedlot.weigh"><Button onClick={() => setWeighOpen(true)}>Record weights</Button></Can>}
           {can("reports.view") && (
             <>
               <Button variant="ghost" onClick={exportCsv}>Export CSV</Button>
@@ -49,6 +52,7 @@ export default function LivestockListPage() {
         </div>
       </div>
       {moduleOff && <ModuleDisabledNotice module="Livestock" />}
+      {!moduleOff && !weighOpen && <Can permission="feedlot.weigh"><WeighQueueNotice /></Can>}
       {exportError && <div className="mb-4"><ErrorState message={exportError} /></div>}
 
       {error && <ErrorState message={error instanceof ApiError ? error.message : "Failed to load livestock"} />}
@@ -58,7 +62,7 @@ export default function LivestockListPage() {
       )}
 
       {data && data.length > 0 && (
-        <div className="overflow-hidden rounded-lg border border-hairline">
+        <div className="overflow-x-auto rounded-lg border border-hairline">
           <table className="w-full text-left text-sm">
             <thead className="bg-forest text-paper">
               <tr>
@@ -99,6 +103,9 @@ export default function LivestockListPage() {
       )}
 
       <LivestockImportModal open={importOpen} onClose={() => setImportOpen(false)} />
+      <Modal open={weighOpen} onClose={() => setWeighOpen(false)} title="Record weights" size="lg">
+        <WeighDayForm layout="stacked" title={null} />
+      </Modal>
     </AdminShell>
   );
 }

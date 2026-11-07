@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Card, EmptyState, ErrorState, Input, Modal, Select } from "@/components/ui";
 import { apiFetch } from "@/lib/api";
-import { errMsg, FarmOption, FIELD, IntakeBatch, kes, parseTagLines, SaleBatch, todayIso } from "./shared";
+import { TagRowsEditor } from "@/components/tag-rows-editor";
+import { analyseTagRows, blankTagRows, type TagRow } from "@/lib/tag-rows";
+import { errMsg, FarmOption, IntakeBatch, kes, SaleBatch, todayIso } from "./shared";
 import { useCycle } from "@/lib/cycle-context";
 
 interface RegisterResult { created: number; results: { animal_number: string; status: string; detail?: string }[] }
@@ -18,7 +20,8 @@ export function BatchesTab() {
   const [addFor, setAddFor] = useState<IntakeBatch | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reg, setReg] = useState<RegisterResult | null>(null);
-  const [lines, setLines] = useState("");
+  const [rows, setRows] = useState<TagRow[]>(() => blankTagRows());
+  const [attempted, setAttempted] = useState(false);
   const [ib, setIb] = useState({ delivered_on: todayIso(), farm_id: "", source: "", sex_class: "bull", head_purchased: "", purchase_cost: "", transport_cost: "", other_fees: "", handlers_cost: "", cycle: "" });
   const [sb, setSb] = useState({ sold_on: todayIso(), price_per_kg: "", buyer_name: "" });
 
@@ -43,11 +46,12 @@ export function BatchesTab() {
     onSuccess: () => { refresh(); setSaleOpen(false); setError(null); },
     onError: (e) => setError(errMsg(e, "Could not create the sale batch")),
   });
-  const parsed = parseTagLines(lines);
+  // One row per animal: Tag | Entry weight (same entry style as the weigh-day form).
+  const analysis = useMemo(() => analyseTagRows(rows), [rows]);
   const register = useMutation({
     mutationFn: () => apiFetch<RegisterResult>(`/api/v1/feedlot/intake-batches/${addFor?.id}/animals`, { method: "POST", body: JSON.stringify({
-      animals: parsed.rows.map((r) => ({ animal_number: r.tag, entry_weight_kg: r.weight })) }) }),
-    onSuccess: (d) => { setReg(d); setError(null); refresh(); qc.invalidateQueries({ queryKey: ["livestock"] }); },
+      animals: analysis.entries.map((r) => ({ animal_number: r.tag, entry_weight_kg: r.weight })) }) }),
+    onSuccess: (d) => { setReg(d); setError(null); setRows(blankTagRows()); setAttempted(false); refresh(); qc.invalidateQueries({ queryKey: ["livestock"] }); },
     onError: (e) => setError(errMsg(e, "Could not add the animals")),
   });
 
@@ -68,7 +72,7 @@ export function BatchesTab() {
             <tr key={b.id} className="border-b border-hairline/60">
               <td className="py-2"><div className="font-medium">{b.name}{b.production_cycle_id && <span className="ml-2 rounded-full border border-forest/30 bg-forest/10 px-2 py-0.5 text-[11px] font-normal text-forest">{cycles.find((c) => c.id === b.production_cycle_id)?.name ?? "cycle"}</span>}</div><div className="text-xs text-muted">{b.delivered_on}{b.source ? ` · ${b.source}` : ""} · {b.sex_class}</div></td>
               <td className="text-right text-xs">{b.head_registered} of {b.head_purchased} added<div className="text-muted">KES {kes(b.landed_cost_per_head)} / head</div></td>
-              <td className="text-right"><Button variant="ghost" onClick={() => { setError(null); setReg(null); setLines(""); setAddFor(b); }}>Add animals</Button></td>
+              <td className="text-right"><Button variant="ghost" onClick={() => { setError(null); setReg(null); setRows(blankTagRows()); setAttempted(false); setAddFor(b); }}>Add animals</Button></td>
             </tr>))}
         </tbody></table></div>
       </Card>
@@ -133,10 +137,19 @@ export function BatchesTab() {
       <Modal open={!!addFor} onClose={() => setAddFor(null)} title={`Add animals to ${addFor?.name ?? ""}`} size="lg">
         <div className="space-y-3">
           {error && <ErrorState message={error} />}
-          <label className="block text-sm font-medium text-ink" htmlFor="addlines">One animal per line: tag, then entry weight in kg</label>
-          <textarea id="addlines" rows={10} value={lines} onChange={(e) => { setLines(e.target.value); setReg(null); }} placeholder={"A01 210\nA02 200\nA03 190"} className={`${FIELD} font-mono`} />
-          <p className="text-xs text-muted">{parsed.rows.length} animal(s) ready{parsed.bad.length > 0 && <span className="text-clay"> · cannot use: {parsed.bad.slice(0, 3).join(" | ")}</span>}. Tags that already exist are skipped, never duplicated.</p>
-          <Button disabled={!parsed.rows.length || parsed.bad.length > 0 || register.isPending} onClick={() => register.mutate()}>{register.isPending ? "Adding…" : "Add animals"}</Button>
+          <TagRowsEditor
+            idPrefix="add" rows={rows} setRows={setRows} analysis={analysis}
+            weightLabel="Entry weight (kg)" weightPlaceholder="e.g. 210"
+            pasteHelp="One animal per line: tag, then entry weight in kg (for example A01 210). Use a dot for decimals."
+            showAllProblems={attempted} onEdit={() => setReg(null)}
+          />
+          <p className="text-xs text-muted">
+            {analysis.entries.length} animal(s) ready{analysis.blocking > 0 && <span className="text-clay"> · {analysis.blocking} row(s) need a tag or a valid weight</span>}. Tags that already exist are skipped, never duplicated.
+          </p>
+          <Button disabled={(!analysis.entries.length && analysis.blocking === 0) || register.isPending} onClick={() => {
+            if (analysis.blocking > 0) { setAttempted(true); setError("Some rows are missing a tag or a valid weight. Fix the highlighted rows, or clear them, then try again."); return; }
+            register.mutate();
+          }}>{register.isPending ? "Adding…" : "Add animals"}</Button>
           {reg && (
             <div className="border-t border-hairline pt-3 text-sm">
               <p className="font-medium text-forest">{reg.created} animal(s) added</p>

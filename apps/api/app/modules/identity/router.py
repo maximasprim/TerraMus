@@ -142,6 +142,32 @@ async def create_user(
     return new_user
 
 
+_USER_UPDATE_ERRORS = {
+    "user_not_found": (status.HTTP_404_NOT_FOUND, "User not found"),
+    "email_taken": (status.HTTP_409_CONFLICT, "Email already registered"),
+    "cannot_deactivate_self": (status.HTTP_400_BAD_REQUEST, "You can't deactivate your own account"),
+    "cannot_reset_own_password": (
+        status.HTTP_400_BAD_REQUEST, "To change your own password use 'Forgot your password?' on the sign-in page",
+    ),
+}
+
+
+@users_router.patch("/{user_id}", response_model=schemas.UserOut)
+async def update_user(
+    user_id: uuid.UUID,
+    req: schemas.UpdateUserRequest,
+    current_user: User = Depends(require_permission("users.manage")),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await service.update_user(db, current_user.organization_id, user_id, req, current_user.id)
+    except ValueError as exc:
+        if str(exc) in _USER_UPDATE_ERRORS:
+            code, message = _USER_UPDATE_ERRORS[str(exc)]
+            raise HTTPException(code, message)
+        raise
+
+
 @users_router.patch("/{user_id}/roles", response_model=schemas.UserOut)
 async def update_user_roles(
     user_id: uuid.UUID,

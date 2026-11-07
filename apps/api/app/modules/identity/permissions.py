@@ -37,6 +37,7 @@ PERMISSIONS: list[tuple[str, str]] = [
     ("search.use", "Use global search across livestock, customers, orders, invoices, suppliers, and inventory"),
     ("feedlot.read", "View feedlot batches, performance, costing and profitability"),
     ("feedlot.weigh", "Record weigh days (bulk weights)"),
+    ("feedlot.intake", "Record feedlot intake: create intake batches and register animals into them"),
     ("feedlot.manage", "Manage feedlot batches, costing documents and worksheet import/export"),
     ("training.read", "View training courses, sessions and enrolments"),
     ("training.manage", "Manage training courses, sessions, enrolments and certificates"),
@@ -48,7 +49,20 @@ PERMISSIONS: list[tuple[str, str]] = [
     ("fodder.manage", "Manage fodder products, prices, plots, cycles, investments, purchases and sales"),
     ("cycles.read", "View production cycles and filter reports by cycle"),
     ("cycles.manage", "Create, edit, close and reopen production cycles; assign records to a cycle"),
+    # --- What a role SEES (visibility switches the farm owner ticks per role in Team > Roles) -------------------
+    # These only show or hide screens; what a person may DO is still decided by the permissions above.
+    ("notifications.view", "Open the Notifications page"),
+    ("animaltabs.timeline", "Show the Timeline tab on an animal's page"),
+    ("animaltabs.health", "Show the Health tab on an animal's page"),
+    ("animaltabs.weights", "Show the Weights tab on an animal's page"),
+    ("animaltabs.movements", "Show the Movements tab on an animal's page"),
+    ("animaltabs.breeding", "Show the Breeding tab on an animal's page"),
+    ("animaltabs.dairy", "Show the Dairy tab on an animal's page"),
 ]
+
+# The visibility switches above. Every staff role starts with ALL of them on, so nothing disappears for anyone until
+# the farm owner unticks it. (Keep in step with migration 0045.)
+VISIBILITY_PERMISSIONS: list[str] = [code for code, _ in PERMISSIONS[-7:]]
 
 # Default role -> permission grants used by org bootstrap/seed data (spec §5, §61).
 DEFAULT_ROLE_GRANTS: dict[str, list[str]] = {
@@ -91,6 +105,15 @@ DEFAULT_ROLE_GRANTS: dict[str, list[str]] = {
         "feedlot.read", "feedlot.weigh",
         "livestock.read", "health.create", "dairy.create", "crops.read", "crops.harvest", "search.use",
     ],
+    # Field recorder: weighs, takes batches in and writes health records, but cannot edit/delete batches, touch
+    # costing, import worksheets, post to Finance, sell or cull (those stay on feedlot.manage / livestock.sell).
+    "Field Recorder": [
+        "cycles.read",
+        "feedlot.read", "feedlot.weigh", "feedlot.intake",
+        "livestock.read", "livestock.create",
+        "health.read", "health.create",
+        "search.use",
+    ],
     "Inventory Manager": [
         "cycles.read",
         "inventory.read", "inventory.adjust", "procurement.manage", "reports.view", "assets.manage", "search.use",
@@ -115,3 +138,9 @@ DEFAULT_ROLE_GRANTS: dict[str, list[str]] = {
     ],
     "Customer": [],  # customers access their own data via ownership checks, not RBAC perms
 }
+
+
+for _role_name, _grants in DEFAULT_ROLE_GRANTS.items():
+    # Farm Owner already holds every code; Customer is the storefront account role and sees no admin screens.
+    if _role_name not in ("Farm Owner", "Customer"):
+        _grants.extend(c for c in VISIBILITY_PERMISSIONS if c not in _grants)

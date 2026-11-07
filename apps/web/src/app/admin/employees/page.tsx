@@ -6,6 +6,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AdminShell } from "@/components/admin-shell";
 import { Button, Input, Select, Modal, ErrorState, EmptyState, StatusBadge } from "@/components/ui";
 import { apiFetch, ApiError } from "@/lib/api";
+import { LoginAccountSelect } from "@/components/login-account-select";
+import { useLoginAccounts, LOGIN_ACCOUNTS_KEY, type LoginAccount } from "@/lib/use-login-accounts";
 import type { Employee } from "@/lib/types";
 
 const EMPLOYMENT_TYPES = ["full_time", "part_time", "casual", "contract"] as const;
@@ -20,11 +22,16 @@ export default function EmployeesPage() {
     queryFn: () => apiFetch<Employee[]>("/api/v1/employees"),
   });
 
+  const accountsQuery = useLoginAccounts();
+  const accounts = accountsQuery.data ?? [];
+  const accountById = new Map(accounts.map((a) => [a.id, a]));
+
   const create = useMutation({
-    mutationFn: (body: { full_name: string; job_title?: string; department?: string; employment_type: string; hire_date?: string }) =>
+    mutationFn: (body: { full_name: string; job_title?: string; department?: string; employment_type: string; hire_date?: string; user_id?: string }) =>
       apiFetch("/api/v1/employees", { method: "POST", body: JSON.stringify(body) }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["employees"] });
+      queryClient.invalidateQueries({ queryKey: LOGIN_ACCOUNTS_KEY });
       setModalOpen(false);
       setError(null);
     },
@@ -48,7 +55,7 @@ export default function EmployeesPage() {
       )}
 
       {data && data.length > 0 && (
-        <div className="overflow-hidden rounded-lg border border-hairline">
+        <div className="overflow-x-auto rounded-lg border border-hairline">
           <table className="w-full text-left text-sm">
             <thead className="bg-forest text-paper">
               <tr>
@@ -56,6 +63,7 @@ export default function EmployeesPage() {
                 <th className="px-4 py-3 font-medium">Name</th>
                 <th className="px-4 py-3 font-medium">Job title</th>
                 <th className="px-4 py-3 font-medium">Department</th>
+                <th className="px-4 py-3 font-medium">Login account</th>
                 <th className="px-4 py-3 font-medium">Status</th>
               </tr>
             </thead>
@@ -70,6 +78,7 @@ export default function EmployeesPage() {
                   <td className="px-4 py-3 font-medium text-ink">{e.full_name}</td>
                   <td className="px-4 py-3 text-muted">{e.job_title ?? "-"}</td>
                   <td className="px-4 py-3 capitalize text-muted">{e.department ?? "-"}</td>
+                  <td className="px-4 py-3 text-muted"><LoginCell account={e.user_id ? accountById.get(e.user_id) : undefined} linked={!!e.user_id} /></td>
                   <td className="px-4 py-3"><StatusBadge status={e.employment_status} /></td>
                 </tr>
               ))}
@@ -79,9 +88,20 @@ export default function EmployeesPage() {
       )}
 
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title="New employee">
-        <EmployeeForm error={error} pending={create.isPending} onSubmit={(b) => create.mutate(b)} />
+        <EmployeeForm error={error} pending={create.isPending} accounts={accounts} onSubmit={(b) => create.mutate(b)} />
       </Modal>
     </AdminShell>
+  );
+}
+
+function LoginCell({ account, linked }: { account?: LoginAccount; linked: boolean }) {
+  if (!linked) return <span>-</span>;
+  if (!account) return <span className="text-xs">Linked</span>;
+  return (
+    <span className="text-xs">
+      {account.email}
+      {!account.is_active && <span className="ml-1 text-clay">(inactive)</span>}
+    </span>
   );
 }
 
@@ -89,16 +109,19 @@ function EmployeeForm({
   onSubmit,
   error,
   pending,
+  accounts,
 }: {
-  onSubmit: (body: { full_name: string; job_title?: string; department?: string; employment_type: string; hire_date?: string }) => void;
+  onSubmit: (body: { full_name: string; job_title?: string; department?: string; employment_type: string; hire_date?: string; user_id?: string }) => void;
   error: string | null;
   pending: boolean;
+  accounts: LoginAccount[];
 }) {
   const [fullName, setFullName] = useState("");
   const [jobTitle, setJobTitle] = useState("");
   const [department, setDepartment] = useState("");
   const [employmentType, setEmploymentType] = useState<string>(EMPLOYMENT_TYPES[0]);
   const [hireDate, setHireDate] = useState("");
+  const [userId, setUserId] = useState("");
 
   return (
     <form
@@ -106,7 +129,7 @@ function EmployeeForm({
         e.preventDefault();
         onSubmit({
           full_name: fullName, job_title: jobTitle || undefined, department: department || undefined,
-          employment_type: employmentType, hire_date: hireDate || undefined,
+          employment_type: employmentType, hire_date: hireDate || undefined, user_id: userId || undefined,
         });
       }}
       className="space-y-3"
@@ -121,6 +144,16 @@ function EmployeeForm({
         ))}
       </Select>
       <Input id="emp-hire" label="Hire date" type="date" value={hireDate} onChange={(e) => setHireDate(e.target.value)} />
+      <LoginAccountSelect
+        id="emp-login"
+        accounts={accounts}
+        value={userId}
+        onChange={(id) => {
+          setUserId(id);
+          const picked = accounts.find((a) => a.id === id);
+          if (picked && !fullName.trim()) setFullName(picked.full_name);   // save retyping the name
+        }}
+      />
       <Button type="submit" disabled={pending} className="w-full">
         {pending ? "Creating…" : "Create employee"}
       </Button>

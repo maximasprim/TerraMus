@@ -8,6 +8,9 @@ import { AnimalPhotoCard } from "@/components/animal-photo";
 import { Can } from "@/components/can";
 import { EditEntityModal } from "@/components/edit-entity-modal";
 import { useCan } from "@/lib/use-auth";
+import { useHiddenTabs } from "@/lib/use-hidden-tabs";
+import { ANIMAL_TAB_PERMISSIONS } from "@/lib/permissions";
+import { TabVisibilityMenu } from "@/components/tab-visibility-menu";
 import { Card, TagChip, StatusBadge, ErrorState, Button, Modal, Input, Select, Textarea } from "@/components/ui";
 import { apiFetch, apiDownload, getAccessToken, API_BASE, ApiError } from "@/lib/api";
 import type { Animal, AnimalEvent, HealthRecord, WeightRecord, BreedingRecord, MilkRecord, Farm, Movement } from "@/lib/types";
@@ -43,6 +46,13 @@ export default function AnimalDetailPage() {
   const [healthModalOpen, setHealthModalOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const can = useCan();
+  const { hidden: hiddenTabs, toggle: toggleTab, reset: resetTabs } = useHiddenTabs();
+  // Tabs the farm owner has switched off for this person's role (Team > Roles). Fails open until /auth/me loads.
+  const roleAllows = (t: string) => { const code = ANIMAL_TAB_PERMISSIONS[t]; return !code || can(code); };
+  useEffect(() => {
+    const code = ANIMAL_TAB_PERMISSIONS[tab];
+    if (code && !can(code)) setTab("Overview");   // e.g. the owner switched this tab off while it was open
+  }, [tab, can]);
   const queryClient = useQueryClient();
 
   const animalQuery = useQuery<Animal>({
@@ -235,6 +245,15 @@ export default function AnimalDetailPage() {
   }
 
   const a = animalQuery.data;
+  // Tabs that exist for this animal and that their role shows; the person can hide more of them (a display choice kept on this device).
+  const applicableTabs = ALL_TABS.filter((t) => {
+    if (!roleAllows(t)) return false;
+    if (t === "Breeding") return a.sex === "female";
+    if (t === "Dairy") return a.sex === "female" && a.species === "cattle";
+    return true;
+  });
+  const visibleTabs = applicableTabs.filter((t) => !hiddenTabs.includes(t));
+  const onToggleTab = (t: string) => { toggleTab(t); if (t === tab) setTab("Overview"); };
 
   return (
     <AdminShell>
@@ -278,23 +297,22 @@ export default function AnimalDetailPage() {
       )}
       {statusError && <div className="mb-4"><ErrorState message={statusError} /></div>}
 
-      <div className="mb-6 flex gap-1 border-b border-hairline">
-        {ALL_TABS.filter((t) => {
-          if (t === "Breeding") return a.sex === "female";
-          if (t === "Dairy") return a.sex === "female" && a.species === "cattle";
-          return true;
-        }).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={clsx(
-              "border-b-2 px-4 py-2 text-sm font-medium transition-colors",
-              tab === t ? "border-brass text-forest" : "border-transparent text-muted hover:text-ink",
-            )}
-          >
-            {t}
-          </button>
-        ))}
+      <div className="mb-6 flex items-end justify-between gap-2 border-b border-hairline">
+        <div className="flex gap-1 overflow-x-auto">
+          {visibleTabs.map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={clsx(
+                "whitespace-nowrap border-b-2 px-4 py-2 text-sm font-medium transition-colors",
+                tab === t ? "border-brass text-forest" : "border-transparent text-muted hover:text-ink",
+              )}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
+        <TabVisibilityMenu tabs={applicableTabs} hidden={hiddenTabs} onToggle={onToggleTab} onReset={resetTabs} />
       </div>
 
       {tab === "Overview" && (

@@ -98,6 +98,16 @@ class UpdateUserRolesRequest(BaseModel):
     role_ids: list[uuid.UUID]
 
 
+class UpdateUserRequest(BaseModel):
+    """Edit a team member's details. Send only what changes; an omitted (or null) field is left alone.
+    `phone` is the one exception: an empty string clears it."""
+    full_name: str | None = Field(default=None, min_length=2, max_length=255)
+    email: NormalizedEmail | None = None
+    phone: str | None = Field(default=None, max_length=32)
+    is_active: bool | None = None
+    new_password: str | None = Field(default=None, min_length=8, max_length=128)
+
+
 class AuditLogOut(BaseModel):
     user_name: str | None = None  # resolved actor name (None for system / platform-support actions)
     model_config = ConfigDict(from_attributes=True)

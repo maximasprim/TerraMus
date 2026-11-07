@@ -91,3 +91,25 @@ def require_permission(permission_code: str):
         return user
 
     return _checker
+
+
+def require_any_permission(*permission_codes: str):
+    """Like require_permission, but passes when the user holds ANY of the given codes.
+
+    Used where a narrower permission (e.g. feedlot.intake) was added beside the broader one that already
+    guarded the route (feedlot.manage), so existing roles keep working unchanged.
+    """
+
+    async def _checker(
+        user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db),
+    ) -> User:
+        perms = await get_user_permissions(db, user)
+        if not any(code in perms for code in permission_codes):
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "Missing required permission: " + " or ".join(permission_codes),
+            )
+        return user
+
+    return _checker

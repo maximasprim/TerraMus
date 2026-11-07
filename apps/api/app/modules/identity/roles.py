@@ -42,7 +42,7 @@ GROUP_LABELS = {
     "customers": "Customers", "users": "Team & roles", "farm": "Farms & settings", "reports": "Reports",
     "audit": "Audit log", "employees": "Employees", "assets": "Assets & fuel", "search": "Search",
     "feedlot": "Feedlot", "training": "Training", "groups": "Flocks, fish & rabbits", "fodder": "Fodder",
-    "cycles": "Production cycles",
+    "cycles": "Production cycles", "notifications": "Notifications", "animaltabs": "Tabs on an animal's page",
 }
 _KNOWN = {code for code, _ in PERMISSIONS}
 

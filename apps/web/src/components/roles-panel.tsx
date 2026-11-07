@@ -18,7 +18,13 @@ const SECTION_LABELS: Record<string, string> = {
   "/admin/fuel": "Fuel", "/admin/customers": "Customers", "/admin/training": "Training", "/admin/orders": "Orders",
   "/admin/inquiries": "Inquiries", "/admin/cms": "Site Content", "/admin/reviews": "Reviews", "/admin/audit": "Audit log",
   "/admin/users": "Team", "/admin/search": "Search", "/admin/settings": "Settings", "/admin/reports": "Reports",
+  "/admin/notifications": "Notifications",
 };
+
+/** Permission group for the on/off switches of the tabs on an animal's page (identity/permissions.py). */
+const TAB_GROUP = "animaltabs";
+/** Switches that show things rather than allow actions: a new role starts with all of them on. */
+const isVisibilityCode = (code: string) => code === "notifications.view" || code.startsWith(`${TAB_GROUP}.`);
 
 /** Pages grouped by the permission that opens them (pages sharing a permission switch together). */
 function pageGroups(): { permission: string; prefixes: string[] }[] {
@@ -98,7 +104,11 @@ export function RolesPanel() {
 function RoleEditor({ role, catalog, onDone }: { role: RoleDetail | null; catalog: RoleCatalog; onDone: () => void }) {
   const [name, setName] = useState(role?.name ?? "");
   const [description, setDescription] = useState(role?.description ?? "");
-  const [selected, setSelected] = useState<Set<string>>(new Set(role?.permissions ?? []));
+  // A brand-new role starts with every "show this" switch on (those the creator may grant), so it sees everything
+  // until the owner unticks something; the owner then adds what it can DO.
+  const [selected, setSelected] = useState<Set<string>>(
+    new Set(role ? role.permissions : catalog.can_grant.filter(isVisibilityCode)),
+  );
   const [error, setError] = useState<string | null>(null);
   const { data: tenantCatalog } = useCatalog();
   const hidden = tenantCatalog?.hidden_menus ?? [];
@@ -106,10 +116,11 @@ function RoleEditor({ role, catalog, onDone }: { role: RoleDetail | null; catalo
   const grantable = useMemo(() => new Set(catalog.can_grant), [catalog]);
   const groups = useMemo(pageGroups, []);
   const gateCodes = useMemo(() => new Set(groups.map((g) => g.permission)), [groups]);
+  const tabSwitches = useMemo(() => catalog.permissions.filter((p) => p.group === TAB_GROUP), [catalog]);
   const byGroup = useMemo(() => {
     const m = new Map<string, { code: string; description: string }[]>();
     for (const p of catalog.permissions) {
-      if (gateCodes.has(p.code)) continue;
+      if (gateCodes.has(p.code) || p.group === TAB_GROUP) continue;
       m.set(p.group_label, [...(m.get(p.group_label) ?? []), p]);
     }
     return Array.from(m);
@@ -170,6 +181,24 @@ function RoleEditor({ role, catalog, onDone }: { role: RoleDetail | null; catalo
           ))}
         </div>
       </section>
+
+      {tabSwitches.length > 0 && (
+        <section>
+          <h3 className="mb-1 text-sm font-medium text-ink">Tabs shown on an animal&apos;s page</h3>
+          <p className="mb-2 text-xs text-muted">
+            Untick a tab to hide it from everyone with this role. Overview is always shown. This only changes what they see:
+            what they can do is set by the permissions below.
+          </p>
+          <div className="grid gap-2 sm:grid-cols-3">
+            {tabSwitches.map((p) => (
+              <label key={p.code} className={`${box} ${disabled(p.code) ? "opacity-50" : ""}`}>
+                <input type="checkbox" className="mt-1" checked={selected.has(p.code)} disabled={disabled(p.code)} onChange={() => toggle(p.code)} />
+                <span>{p.code.slice(TAB_GROUP.length + 1).replace(/^./, (c) => c.toUpperCase())}</span>
+              </label>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section>
         <h3 className="mb-1 text-sm font-medium text-ink">What they can do inside those pages</h3>

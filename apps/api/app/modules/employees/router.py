@@ -33,6 +33,15 @@ async def create_employee(
     return await service.create_employee(db, user.organization_id, req)
 
 
+# Declared before "/{employee_id}" so the path is not read as an employee id.
+@router.get("/login-accounts", response_model=list[schemas.LoginAccountOut])
+async def list_login_accounts(
+    user: User = Depends(require_permission("employees.manage")),
+    db: AsyncSession = Depends(get_db),
+):
+    return await service.list_login_accounts(db, user.organization_id)
+
+
 @router.get("/{employee_id}", response_model=schemas.EmployeeDetailOut)
 async def get_employee(
     employee_id: uuid.UUID,

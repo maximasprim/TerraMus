@@ -15,7 +15,7 @@ router = APIRouter(prefix="/api/v1/notifications", tags=["notifications"])
 @router.get("", response_model=list[schemas.NotificationOut])
 async def list_notifications(
     unread_only: bool = Query(False),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("notifications.view")),
     db: AsyncSession = Depends(get_db),
 ):
     return await service.list_notifications(db, user, unread_only)
@@ -24,7 +24,7 @@ async def list_notifications(
 @router.post("/{notification_id}/read", response_model=schemas.NotificationOut)
 async def mark_read(
     notification_id: uuid.UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("notifications.view")),
     db: AsyncSession = Depends(get_db),
 ):
     return await service.mark_read(db, user, notification_id)
@@ -32,7 +32,7 @@ async def mark_read(
 
 @router.post("/read-all")
 async def mark_all_read(
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("notifications.view")),
     db: AsyncSession = Depends(get_db),
 ):
     count = await service.mark_all_read(db, user)
@@ -41,7 +41,7 @@ async def mark_all_read(
 
 @router.get("/preferences")
 async def get_preferences(
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("notifications.view")),
     db: AsyncSession = Depends(get_db),
 ):
     """The categories this user has explicitly switched on or off. A category with no row is on (the default), so
@@ -52,7 +52,7 @@ async def get_preferences(
 @router.put("/preferences")
 async def set_preference(
     req: schemas.PreferenceUpdate,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("notifications.view")),
     db: AsyncSession = Depends(get_db),
 ):
     pref = await service.set_preference(db, user, req.category, req.enabled)

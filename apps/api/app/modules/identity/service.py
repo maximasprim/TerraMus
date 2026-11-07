@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -432,6 +432,91 @@ async def update_user_roles(
     ))
 
     await db.commit()
+    await db.refresh(user)
+    return user
+
+
+async def update_user(
+    db: AsyncSession, org_id: uuid.UUID, target_user_id: uuid.UUID,
+    req: "schemas.UpdateUserRequest", changed_by: uuid.UUID,
+) -> User:
+    """Edit a team member's name / email / phone, switch the account on or off, or set a new password.
+
+    Tenant-scoped like update_user_roles. Writes one `user_updated` audit row that records what changed (never the
+    password itself). Setting a new password or deactivating the account also signs the person out everywhere by
+    revoking their refresh tokens (their short-lived access token stops working on its own, and an inactive user is
+    rejected by get_current_user straight away).
+    """
+    result = await db.execute(
+        select(User).options(selectinload(User.roles)).where(
+            User.id == target_user_id, User.organization_id == org_id,
+        )
+    )
+    user = result.scalar_one_or_none()
+    if not user:
+        raise ValueError("user_not_found")
+
+    data = req.model_dump(exclude_unset=True)
+    before: dict = {}
+    after: dict = {}
+    sign_out = False
+
+    full_name = data.get("full_name")
+    if full_name is not None and full_name.strip() != user.full_name:
+        before["full_name"], after["full_name"] = user.full_name, full_name.strip()
+        user.full_name = full_name.strip()
+
+    email = data.get("email")
+    if email is not None and email.lower() != user.email.lower():
+        clash = await db.execute(
+            select(User.id).where(func.lower(User.email) == email.lower(), User.id != user.id)
+        )
+        if clash.first():
+            raise ValueError("email_taken")
+        before["email"], after["email"] = user.email, email
+        user.email = email
+
+    if "phone" in data:
+        phone = (data["phone"] or "").strip() or None
+        if phone != user.phone:
+            before["phone"], after["phone"] = user.phone, phone
+            user.phone = phone
+
+    is_active = data.get("is_active")
+    if is_active is not None and is_active != user.is_active:
+        if not is_active and user.id == changed_by:
+            raise ValueError("cannot_deactivate_self")
+        before["is_active"], after["is_active"] = user.is_active, is_active
+        user.is_active = is_active
+        sign_out = sign_out or not is_active
+
+    new_password = data.get("new_password")
+    if new_password is not None:
+        if user.id == changed_by:
+            raise ValueError("cannot_reset_own_password")
+        user.password_hash = hash_password(new_password)
+        after["password_reset"] = True
+        sign_out = True
+
+    if not before and not after:
+        return user                                   # nothing changed: no audit row, no write
+
+    if sign_out:
+        await db.execute(
+            update(RefreshToken).where(RefreshToken.user_id == user.id, RefreshToken.revoked.is_(False)).values(revoked=True)
+        )
+    db.add(AuditLog(
+        organization_id=org_id, user_id=changed_by, action="user_updated",
+        entity_type="user", entity_id=target_user_id,
+        previous_value=before or None, new_value=after,
+    ))
+    try:
+        await db.commit()
+    except IntegrityError as exc:                     # two edits to the same address at the same instant
+        await db.rollback()
+        if "email" in str(exc.orig).lower():
+            raise ValueError("email_taken") from exc
+        raise
     await db.refresh(user)
     return user
 

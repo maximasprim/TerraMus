@@ -30,11 +30,44 @@ async def _next_employee_number(db: AsyncSession, org_id: uuid.UUID) -> str:
     return f"{org.employee_prefix}-{number:06d}"  # spec §60 - prefix is now org-configurable
 
 
+async def _check_login_account(
+    db: AsyncSession, org_id: uuid.UUID, user_id: uuid.UUID, employee_id: uuid.UUID | None = None,
+) -> None:
+    """A login account can be linked to a staff member of this organization, and to one employee only."""
+    user = (await db.execute(
+        select(User).where(User.id == user_id, User.organization_id == org_id)
+    )).scalar_one_or_none()
+    if not user:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found in this organization")
+    if user.customer_id is not None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Customer accounts can't be linked to an employee")
+    clash = select(Employee.id).where(Employee.organization_id == org_id, Employee.user_id == user_id)
+    if employee_id is not None:
+        clash = clash.where(Employee.id != employee_id)
+    if (await db.execute(clash)).first():
+        raise HTTPException(status.HTTP_409_CONFLICT, "That login account is already linked to another employee")
+
+
+async def list_login_accounts(db: AsyncSession, org_id: uuid.UUID) -> list[schemas.LoginAccountOut]:
+    """Every staff login (customer-portal accounts excluded) with the employee it is linked to, if any."""
+    rows = await db.execute(
+        select(User, Employee.id, Employee.employee_number)
+        .outerjoin(Employee, (Employee.user_id == User.id) & (Employee.organization_id == org_id))
+        .where(User.organization_id == org_id, User.customer_id.is_(None))
+        .order_by(User.full_name)
+    )
+    return [
+        schemas.LoginAccountOut(
+            id=u.id, full_name=u.full_name, email=u.email, is_active=u.is_active,
+            employee_id=emp_id, employee_number=emp_number,
+        )
+        for u, emp_id, emp_number in rows.all()
+    ]
+
+
 async def create_employee(db: AsyncSession, org_id: uuid.UUID, req: schemas.EmployeeCreate) -> Employee:
     if req.user_id is not None:
-        user = await db.execute(select(User).where(User.id == req.user_id, User.organization_id == org_id))
-        if not user.scalar_one_or_none():
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found in this organization")
+        await _check_login_account(db, org_id, req.user_id)
 
     employee_number = await _next_employee_number(db, org_id)
     employee = Employee(organization_id=org_id, employee_number=employee_number, **req.model_dump())
@@ -93,7 +126,10 @@ async def update_employee(
     db: AsyncSession, org_id: uuid.UUID, employee_id: uuid.UUID, req: schemas.EmployeeUpdate,
 ) -> Employee:
     employee = await get_employee(db, org_id, employee_id)
-    for field, value in req.model_dump(exclude_unset=True).items():
+    data = req.model_dump(exclude_unset=True)
+    if data.get("user_id") is not None:
+        await _check_login_account(db, org_id, data["user_id"], employee.id)
+    for field, value in data.items():
         setattr(employee, field, value)
     await db.commit()
     await db.refresh(employee)

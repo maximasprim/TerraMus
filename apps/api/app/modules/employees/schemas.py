@@ -22,6 +22,7 @@ class EmployeeCreate(BaseModel):
 
 
 class EmployeeUpdate(BaseModel):
+    user_id: uuid.UUID | None = None  # link / unlink the login account; omit to leave it as it is, null to unlink
     full_name: str | None = None
     phone: str | None = None
     email: EmailStr | None = None
@@ -67,6 +68,16 @@ class EmployeeOut(BaseModel):
     termination_date: date | None
     notes: str | None
     created_at: datetime
+
+
+class LoginAccountOut(BaseModel):
+    """A staff login account, and the employee record (if any) it is linked to. Powers the 'Login account' picker."""
+    id: uuid.UUID
+    full_name: str
+    email: str
+    is_active: bool
+    employee_id: uuid.UUID | None = None
+    employee_number: str | None = None
 
 
 class EmployeeDetailOut(EmployeeOut):
