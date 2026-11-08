@@ -23,7 +23,9 @@ export function useIdleLogout(idleMinutes: number | undefined): number | null {
     const minutes = idleMinutes ?? 0;
     if (!minutes || getWorkspaceSession()) { setLeft(null); return; }
 
-    if (!read(ACTIVITY_KEY)) write(ACTIVITY_KEY, Date.now());
+    // Opening or reloading the dashboard is itself activity. This also discards a stale time left over from an
+    // earlier session; the server still refuses a login that really was idle too long, so nothing is bypassed.
+    write(ACTIVITY_KEY, Date.now());
     let lastWrite = 0;
     const touch = () => {
       const now = Date.now();

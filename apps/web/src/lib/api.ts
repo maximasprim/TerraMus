@@ -42,6 +42,8 @@ export function clearTokens() {
   localStorage.removeItem(ACCESS_KEY);
   localStorage.removeItem(REFRESH_KEY);
   localStorage.removeItem(ME_CACHE_KEY);   // the cached profile must not outlive the session
+  localStorage.removeItem("farm.last_activity");     // inactivity clock (lib/use-idle-logout.ts): a new login starts fresh
+  localStorage.removeItem("farm.last_keepalive");
 }
 
 // The last successful "who am I" answer, kept so the app can open with no signal (see useMe).
