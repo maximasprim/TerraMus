@@ -430,13 +430,14 @@ export default function AnimalDetailPage() {
               + Record weight
             </Button></Can>
           </div>
-          <Card>
+          <Card className="p-4 sm:p-6">
             {weightsQuery.isLoading && <p className="text-sm text-muted">Loading…</p>}
             {weightsQuery.data && weightsQuery.data.length === 0 && (
               <p className="text-sm text-muted">No weight records yet.</p>
             )}
             {weightsQuery.data && weightsQuery.data.length > 0 && (
-              <table className="w-full text-left text-sm">
+              <>
+              <table className="hidden w-full text-left text-sm sm:table">
                 <thead>
                   <tr className="border-b border-hairline text-xs uppercase tracking-wider text-muted">
                     <th className="pb-2 font-medium">Date</th>
@@ -448,9 +449,9 @@ export default function AnimalDetailPage() {
                 <tbody>
                   {weightsQuery.data.map((w) => (
                     <tr key={w.id} className="border-b border-hairline/60 last:border-0">
-                      <td className="py-2">{new Date(w.recorded_at).toLocaleDateString()}</td>
-                      <td className="py-2 font-medium text-ink">{w.weight_kg} kg</td>
-                      <td className="py-2 text-muted">
+                      <td className="whitespace-nowrap py-2 pr-3">{new Date(w.recorded_at).toLocaleDateString()}</td>
+                      <td className="whitespace-nowrap py-2 pr-3 font-medium text-ink">{w.weight_kg} kg</td>
+                      <td className="whitespace-nowrap py-2 pr-3 text-muted">
                         {w.average_daily_gain ? `${w.average_daily_gain} kg/day` : "-"}
                       </td>
                       <td className="py-2 text-muted">{w.notes ?? "-"}</td>
@@ -458,6 +459,22 @@ export default function AnimalDetailPage() {
                   ))}
                 </tbody>
               </table>
+              {/* Phones: one compact card per record instead of a squeezed four-column table */}
+              <ul className="divide-y divide-hairline/60 sm:hidden">
+                {weightsQuery.data.map((w) => (
+                  <li key={w.id} className="py-3 first:pt-0 last:pb-0">
+                    <div className="flex items-baseline justify-between gap-3">
+                      <span className="text-lg font-medium text-ink">{w.weight_kg} kg</span>
+                      <span className="text-xs text-muted">{new Date(w.recorded_at).toLocaleDateString()}</span>
+                    </div>
+                    <p className="mt-0.5 text-xs text-muted">
+                      {w.average_daily_gain ? `Gain ${w.average_daily_gain} kg/day` : "No gain figure yet"}
+                    </p>
+                    {w.notes && <p className="mt-1 text-sm text-muted">{w.notes}</p>}
+                  </li>
+                ))}
+              </ul>
+              </>
             )}
           </Card>
         </div>
