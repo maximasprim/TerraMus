@@ -317,7 +317,7 @@ export default function AnimalDetailPage() {
 
       {tab === "Overview" && (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <AnimalPhotoCard animalId={id} canEdit={can("livestock.update")} />
+          <AnimalPhotoCard animalId={id} canEdit={can("livestock.update") || can("livestock.photo")} canRemove={can("livestock.update")} />
           <Card>
             <h2 className="mb-3 font-display text-lg text-forest">Details</h2>
             <dl className="space-y-2 text-sm">
@@ -426,7 +426,7 @@ export default function AnimalDetailPage() {
       {tab === "Weights" && (
         <div>
           <div className="mb-4 flex justify-end">
-            <Can permission="livestock.update"><Button onClick={() => { setWeightFormError(null); setWeightModalOpen(true); }}>
+            <Can permission="livestock.update" or="livestock.weigh"><Button onClick={() => { setWeightFormError(null); setWeightModalOpen(true); }}>
               + Record weight
             </Button></Can>
           </div>

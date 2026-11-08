@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base, UUIDPKMixin, get_db
-from app.modules.identity.deps import require_permission
+from app.modules.identity.deps import require_permission, require_any_permission
 from app.modules.identity.models import User
 from app.modules.livestock.models import Animal
 
@@ -41,7 +41,7 @@ async def _animal(db, org_id, animal_id) -> Animal:
 
 
 @router.put("")
-async def upload_photo(animal_id: uuid.UUID, file: UploadFile = File(...), user: User = Depends(require_permission("livestock.update")),
+async def upload_photo(animal_id: uuid.UUID, file: UploadFile = File(...), user: User = Depends(require_any_permission("livestock.update", "livestock.photo")),
                        db: AsyncSession = Depends(get_db)):
     from PIL import Image, ImageOps, UnidentifiedImageError
     await _animal(db, user.organization_id, animal_id)

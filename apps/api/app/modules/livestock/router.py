@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.modules.identity.deps import require_permission
+from app.modules.identity.deps import require_any_permission, require_permission
 from app.modules.identity.models import User
 from app.modules.farm.models import Farm, Location
 from app.modules.livestock import schemas, service
@@ -147,7 +147,7 @@ async def get_weights(
 async def add_weight(
     animal_id: uuid.UUID,
     req: schemas.WeightRecordCreate,
-    user: User = Depends(require_permission("livestock.update")),
+    user: User = Depends(require_any_permission("livestock.update", "livestock.weigh")),
     db: AsyncSession = Depends(get_db),
 ):
     animal = await service.get_animal(db, animal_id, user.organization_id)

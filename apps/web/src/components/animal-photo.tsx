@@ -22,7 +22,7 @@ async function shrink(file: File, maxEdge = 1600): Promise<Blob> {
   }
 }
 
-export function AnimalPhotoCard({ animalId, canEdit }: { animalId: string; canEdit: boolean }) {
+export function AnimalPhotoCard({ animalId, canEdit, canRemove = canEdit }: { animalId: string; canEdit: boolean; canRemove?: boolean }) {
   const [url, setUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -81,7 +81,7 @@ export function AnimalPhotoCard({ animalId, canEdit }: { animalId: string; canEd
           <input ref={input} type="file" accept="image/*" capture="environment" className="hidden" aria-label="Choose animal photo"
             onChange={(e) => { const f = e.target.files?.[0]; if (f) void upload(f); }} />
           <Button variant="ghost" disabled={busy} onClick={() => input.current?.click()}>{busy ? "Working…" : url ? "Replace photo" : "Take or choose photo"}</Button>
-          {url && <Button variant="ghost" disabled={busy} onClick={() => void remove()}>Remove</Button>}
+          {url && canRemove && <Button variant="ghost" disabled={busy} onClick={() => void remove()}>Remove</Button>}
         </div>
       )}
     </Card>

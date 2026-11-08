@@ -5,6 +5,8 @@ PERMISSIONS: list[tuple[str, str]] = [
     ("livestock.read", "View livestock records"),
     ("livestock.create", "Register new livestock"),
     ("livestock.update", "Update livestock records"),
+    ("livestock.photo", "Add or replace an animal's photo"),
+    ("livestock.weigh", "Record an animal's weight"),
     ("livestock.delete", "Delete/archive livestock records"),
     ("livestock.sell", "Mark livestock as sold / manage sales"),
     ("health.read", "View health records"),
@@ -147,9 +149,14 @@ DEFAULT_ROLE_GRANTS: dict[str, list[str]] = {
 }
 
 
+ANIMAL_RECORDING_PERMISSIONS = ["livestock.photo", "livestock.weigh"]
+
 for _role_name, _grants in DEFAULT_ROLE_GRANTS.items():
     # Farm Owner already holds every code; Customer is the storefront account role and sees no admin screens.
     if _role_name not in ("Farm Owner", "Customer"):
         _grants.extend(c for c in VISIBILITY_PERMISSIONS if c not in _grants)
         if "livestock.read" in _grants and LISTINGS_VIEW not in _grants:
             _grants.append(LISTINGS_VIEW)
+        # Photo and weight have their own ticks; anyone who could already update livestock keeps both (migration 0047).
+        if "livestock.update" in _grants:
+            _grants.extend(c for c in ANIMAL_RECORDING_PERMISSIONS if c not in _grants)
