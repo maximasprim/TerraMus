@@ -528,6 +528,10 @@ async def update_user(
     return user
 
 
+class EmailDeliveryError(Exception):
+    """The mail service did not accept the message."""
+
+
 async def request_password_reset(db: AsyncSession, email: str) -> None:
     """Spec §5: 'password reset.' Deliberately returns None (never a
     'no such user' signal) regardless of whether the email matches an
@@ -560,10 +564,11 @@ async def request_password_reset(db: AsyncSession, email: str) -> None:
             ),
             organization_id=user.organization_id, related_user_id=user.id,
         )
-    except Exception:
-        # A mail-server problem must not turn into a 500: that would also reveal which emails are registered
-        # (only real accounts would fail). The failed attempt is already recorded in the email outbox.
+    except Exception as exc:
+        # The failed attempt is already in the email outbox; log it and tell the caller so the person is not
+        # told "sent" when nothing was.
         logging.getLogger(__name__).exception("password reset email could not be sent")
+        raise EmailDeliveryError("password reset email could not be sent") from exc
 
 
 async def confirm_password_reset(db: AsyncSession, raw_token: str, new_password: str) -> None:

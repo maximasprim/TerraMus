@@ -290,7 +290,12 @@ async def request_password_reset(
     """Same brute-force-relevant limiter as /register - a reset-request
     endpoint is exactly the kind of thing worth throttling (spec §29)."""
     await rate_limit_auth(request)
-    await service.request_password_reset(db, req.email)
+    try:
+        await service.request_password_reset(db, req.email)
+    except service.EmailDeliveryError:
+        # Not a silent "sent": when the mail service is down, say so (the link is not usable by anyone else).
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE,
+                            "We couldn't send the email right now. Please try again in a few minutes, or contact your administrator.")
     # Identical message whether or not the email matched an account - see
     # service.request_password_reset's docstring for why that's deliberate.
     return {"detail": "If that email is registered, a password reset link has been sent."}

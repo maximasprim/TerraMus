@@ -58,7 +58,9 @@ class Settings(BaseSettings):
     # what tests use; the mock provider always succeeds without a network
     # call, mirroring PAYMENT_PROVIDER_MODE's mock default. Switch to "smtp"
     # and fill in the fields below to send real email.
-    EMAIL_PROVIDER_MODE: str = "mock"  # mock | smtp
+    EMAIL_PROVIDER_MODE: str = "smtp"  # mock | smtp
+    EMAIL_API_KEY: str = "" 
+    EMAIL_FROM_NAME: str = "TerraMus"
     SMTP_HOST: str = ""
     SMTP_PORT: int = 587
     SMTP_USERNAME: str = ""

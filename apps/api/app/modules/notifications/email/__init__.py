@@ -1,10 +1,13 @@
 from app.modules.notifications.email.base import EmailProvider
 from app.modules.notifications.email.mock import MockEmailProvider
+from app.modules.notifications.email.http_providers import BrevoEmailProvider, ResendEmailProvider
 from app.modules.notifications.email.smtp_provider import SMTPEmailProvider
 
 _PROVIDERS: dict[str, type[EmailProvider]] = {
     "mock": MockEmailProvider,
     "smtp": SMTPEmailProvider,
+    "brevo": BrevoEmailProvider,
+    "resend": ResendEmailProvider,
 }
 
 
