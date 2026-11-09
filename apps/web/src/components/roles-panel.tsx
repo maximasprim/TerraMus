@@ -11,7 +11,7 @@ import type { RoleDetail, RoleCatalog } from "@/lib/types";
 /** Sidebar names, for the "pages this role can open" list. */
 const SECTION_LABELS: Record<string, string> = {
   "/admin/dashboard": "Dashboard", "/admin/livestock": "Livestock", "/admin/cycles": "Production Cycles",
-  "/admin/feedlot": "Feedlot", "/admin/groups": "Flocks & Fish", "/admin/fodder": "Fodder", "/admin/crops": "Crops",
+  "/admin/feedlot": "Feedlot", "/admin/weights": "Weights", "/admin/groups": "Flocks & Fish", "/admin/fodder": "Fodder", "/admin/crops": "Crops",
   "/admin/listings": "Listings", "/admin/reservations": "Reservations", "/admin/inventory": "Inventory",
   "/admin/procurement": "Procurement", "/admin/finance": "Finance", "/admin/receivables": "Receivables",
   "/admin/billing": "Billing", "/admin/farms": "Farms", "/admin/employees": "Employees", "/admin/assets": "Assets",

@@ -17,7 +17,7 @@ ACTIONS = {
 # ... plus the display-only "show this page / tab" switches every staff role starts with (migration 0045). They grant
 # no ability to do anything; the farm owner can untick them per role.
 # (listings.view: it holds livestock.read, which has always opened Listings, so it keeps that - migration 0046.)
-EXPECTED = ACTIONS | set(VISIBILITY_PERMISSIONS) | {"listings.view"}
+EXPECTED = ACTIONS | set(VISIBILITY_PERMISSIONS) | {"listings.view", "weights.view"}
 
 
 async def _owner(client, org="Field Farm", email="fieldowner@example.com"):

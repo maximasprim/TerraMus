@@ -15,6 +15,7 @@ MENUS: tuple[tuple[str, str, str], ...] = (
     ("/admin/livestock", "Livestock", "Farm operations"),
     ("/admin/cycles", "Production Cycles", "Farm operations"),
     ("/admin/feedlot", "Feedlot", "Farm operations"),
+    ("/admin/weights", "Weights", "Farm operations"),
     ("/admin/groups", "Flocks & Fish", "Farm operations"),
     ("/admin/fodder", "Fodder", "Farm operations"),
     ("/admin/crops", "Crops", "Farm operations"),

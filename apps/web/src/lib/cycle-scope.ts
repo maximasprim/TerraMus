@@ -22,6 +22,7 @@ const re = (s: string) => new RegExp(`^${s}${Q}`);
 const FILTERED_GET: RegExp[] = [
   // (costing documents are deliberately NOT filtered: the Costing tab always lists organisation-level and cycle-specific documents together)
   re("/api/v1/feedlot/(intake-batches|sale-batches|weigh-days|performance|profitability|worksheet/export)"),
+  re("/api/v1/weights/(overview|daily)"),
   re("/api/v1/finance/(transactions|summary|profitability)"),
   re("/api/v1/receivables/(balances|sales-by-salesperson)"),
   re("/api/v1/receivables/customers/[^/?]+/statement"),

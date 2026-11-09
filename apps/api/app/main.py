@@ -60,6 +60,7 @@ from app.modules.fuel.router import router as fuel_router
 from app.modules.cycles.router import router as cycles_router
 from app.modules.feedback.router import public as feedback_public_router, staff as feedback_staff_router
 from app.modules.livestock.photo import router as animal_photo_router
+from app.modules.weights.router import router as weights_router
 
 settings = get_settings()
 
@@ -223,6 +224,7 @@ app.include_router(feedback_public_router)
 app.include_router(feedback_staff_router)
 app.include_router(animal_photo_router)
 app.include_router(inquiries_router)
+app.include_router(weights_router)
 app.include_router(inquiries_public_router)
 
 # --- platform-admin / billing ----------------------------------------------

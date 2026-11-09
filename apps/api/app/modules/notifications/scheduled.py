@@ -87,7 +87,8 @@ async def run_scheduled_checks(db: AsyncSession, org_id: uuid.UUID, today: date 
             out.feedlot_unweighed_notified = await _alert(
                 db, org_id, today, "feedlot:unweighed", WEEKLY, "feedlot.read", "system", "Animals overdue for weighing",
                 f"{len(stale)} animal(s) have not been weighed in over 45 days: {_list(stale)}.")
-        ready = [a["tag"] for a in perf["animals"] if a["status"] == "active" and a["market_ready"]]
+        ready = [a["tag"] for a in perf["animals"] if a["status"] == "active" and a["market_ready"]
+                 and a["target_source"] == "default" and not a.get("ready_hold")]   # target-bearing animals are alerted by Weights
         if ready:
             out.feedlot_market_ready_notified = await _alert(
                 db, org_id, today, "feedlot:market_ready", WEEKLY, "feedlot.read", "system", "Animals ready for market",
@@ -136,4 +137,25 @@ async def run_scheduled_checks(db: AsyncSession, org_id: uuid.UUID, today: date 
     if low_cover_alerts:
         for key, title, message in await low_cover_alerts(db, org_id, today):
             out.fodder_notified += await _alert(db, org_id, today, key, 3, "fodder.read", "inventory", title, message)
+
+    # --- weights: animals that reached (or are about to reach) their target weight. One alert per animal per stage,
+    # ever; several animals found on the same day are sent as one message. Animals that are not healthy wait.
+    from app.modules.weights import service as weights_service
+    assessed = await weights_service.assess_org(db, org_id, today)
+    for stage, title, field in (("ready", "Animals ready for market", "weights_ready_notified"),
+                                ("nearly_ready", "Animals nearly ready for market", "weights_nearly_ready_notified")):
+        fresh = [r for r in assessed if r["stage"] == stage and not r["hold_reason"]
+                 and await _is_due(db, org_id, f"weights:{stage}:{r['id']}", 3650, today)]
+        if not fresh:
+            continue
+        if stage == "ready":
+            bits = [f"{r['tag']} ({r['current_kg']:g} kg, target {r['target_kg']:g})" for r in fresh]
+            message = f"{len(fresh)} animal(s) reached their target weight: {_list(bits)}."
+        else:
+            bits = [f"{r['tag']} (about {r['days_to_ready']} days, {r['current_kg']:g}/{r['target_kg']:g} kg)" for r in fresh]
+            message = f"{len(fresh)} animal(s) are about to reach their target weight: {_list(bits)}."
+        await notify_users_with_permission(db, org_id, "livestock.sell", "system", title, message)
+        for r in fresh:
+            await _mark_sent(db, org_id, f"weights:{stage}:{r['id']}", today)
+        setattr(out, field, len(fresh))
     return out

@@ -7,6 +7,8 @@ PERMISSIONS: list[tuple[str, str]] = [
     ("livestock.update", "Update livestock records"),
     ("livestock.photo", "Add or replace an animal's photo"),
     ("livestock.weigh", "Record an animal's weight"),
+    ("weights.view", "Open the Weights report"),
+    ("weights.targets", "Set target weights for batches and animals"),
     ("livestock.delete", "Delete/archive livestock records"),
     ("livestock.sell", "Mark livestock as sold / manage sales"),
     ("health.read", "View health records"),
@@ -160,3 +162,9 @@ for _role_name, _grants in DEFAULT_ROLE_GRANTS.items():
         # Photo and weight have their own ticks; anyone who could already update livestock keeps both (migration 0047).
         if "livestock.update" in _grants:
             _grants.extend(c for c in ANIMAL_RECORDING_PERMISSIONS if c not in _grants)
+        # Weights report: anyone who can see animals can see how they are gaining; whoever manages the feedlot or
+        # updates livestock can set targets (migration 0048).
+        if "livestock.read" in _grants and "weights.view" not in _grants:
+            _grants.append("weights.view")
+        if ("feedlot.manage" in _grants or "livestock.update" in _grants) and "weights.targets" not in _grants:
+            _grants.append("weights.targets")

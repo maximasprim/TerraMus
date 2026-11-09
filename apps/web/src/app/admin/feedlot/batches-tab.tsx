@@ -22,7 +22,7 @@ export function BatchesTab() {
   const [reg, setReg] = useState<RegisterResult | null>(null);
   const [rows, setRows] = useState<TagRow[]>(() => blankTagRows());
   const [attempted, setAttempted] = useState(false);
-  const [ib, setIb] = useState({ delivered_on: todayIso(), farm_id: "", source: "", sex_class: "bull", head_purchased: "", purchase_cost: "", transport_cost: "", other_fees: "", handlers_cost: "", cycle: "" });
+  const [ib, setIb] = useState({ delivered_on: todayIso(), farm_id: "", source: "", sex_class: "bull", head_purchased: "", purchase_cost: "", transport_cost: "", other_fees: "", handlers_cost: "", target: "", cycle: "" });
   const [sb, setSb] = useState({ sold_on: todayIso(), price_per_kg: "", buyer_name: "" });
 
   const farms = useQuery<FarmOption[]>({ queryKey: ["farms"], queryFn: () => apiFetch<FarmOption[]>("/api/v1/farms") });
@@ -36,6 +36,7 @@ export function BatchesTab() {
       delivered_on: ib.delivered_on, farm_id: ib.farm_id || undefined, source: ib.source || undefined, sex_class: ib.sex_class,
       head_purchased: Number(ib.head_purchased) || 0, purchase_cost: money(ib.purchase_cost), transport_cost: money(ib.transport_cost),
       other_fees: money(ib.other_fees), handlers_cost: money(ib.handlers_cost),
+      target_weight_kg: ib.target ? ib.target : undefined,
       production_cycle_id: ib.cycle || null }) }),     // explicit (null = deliberately no cycle), so the header filter never overrides this choice
     onSuccess: () => { refresh(); setIntakeOpen(false); setError(null); },
     onError: (e) => setError(errMsg(e, "Could not create the batch")),
@@ -70,7 +71,7 @@ export function BatchesTab() {
         <div className="overflow-x-auto"><table className="w-full text-sm"><tbody>
           {(intake.data ?? []).map((b) => (
             <tr key={b.id} className="border-b border-hairline/60">
-              <td className="py-2"><div className="font-medium">{b.name}{b.production_cycle_id && <span className="ml-2 rounded-full border border-forest/30 bg-forest/10 px-2 py-0.5 text-[11px] font-normal text-forest">{cycles.find((c) => c.id === b.production_cycle_id)?.name ?? "cycle"}</span>}</div><div className="text-xs text-muted">{b.delivered_on}{b.source ? ` · ${b.source}` : ""} · {b.sex_class}</div></td>
+              <td className="py-2"><div className="font-medium">{b.name}{b.production_cycle_id && <span className="ml-2 rounded-full border border-forest/30 bg-forest/10 px-2 py-0.5 text-[11px] font-normal text-forest">{cycles.find((c) => c.id === b.production_cycle_id)?.name ?? "cycle"}</span>}</div><div className="text-xs text-muted">{b.delivered_on}{b.source ? ` · ${b.source}` : ""} · {b.sex_class}{b.target_weight_kg ? ` · target ${Number(b.target_weight_kg)} kg` : ""}</div></td>
               <td className="text-right text-xs">{b.head_registered} of {b.head_purchased} added<div className="text-muted">KES {kes(b.landed_cost_per_head)} / head</div></td>
               <td className="text-right"><Button variant="ghost" onClick={() => { setError(null); setReg(null); setRows(blankTagRows()); setAttempted(false); setAddFor(b); }}>Add animals</Button></td>
             </tr>))}
@@ -119,6 +120,8 @@ export function BatchesTab() {
             <Input label="Other fees (KES)" type="number" min="0" value={ib.other_fees} onChange={(e) => setIb({ ...ib, other_fees: e.target.value })} />
             <Input label="Handlers (KES)" type="number" min="0" value={ib.handlers_cost} onChange={(e) => setIb({ ...ib, handlers_cost: e.target.value })} />
           </div>
+          <Input label="Target weight (kg, optional)" type="number" min="1" step="0.5" placeholder="e.g. 450" value={ib.target} onChange={(e) => setIb({ ...ib, target: e.target.value })} />
+          <p className="-mt-2 text-xs text-muted">The weight at which animals in this batch are ready for market. The Weights page uses it to show readiness; you can change it there at any time.</p>
           {perHead != null && <p className="text-sm text-muted">Landed cost per head: <b className="text-forest">KES {kes(perHead)}</b>. Every animal added carries this as its buying price.</p>}
           <Button disabled={!ib.farm_id || !(Number(ib.head_purchased) > 0) || makeIntake.isPending} onClick={() => makeIntake.mutate()}>Create batch</Button>
         </div>

@@ -25,6 +25,7 @@ export const SECTION_PERMISSIONS: SectionPermission[] = [
   { prefix: "/admin/livestock", permission: "livestock.read" },
   { prefix: "/admin/cycles", permission: "cycles.read" },
   { prefix: "/admin/feedlot", permission: "feedlot.read" },
+  { prefix: "/admin/weights", permission: "weights.view" },
   { prefix: "/admin/groups", permission: "groups.read" },
   { prefix: "/admin/fodder", permission: "fodder.read" },
   { prefix: "/admin/crops", permission: "crops.read" },

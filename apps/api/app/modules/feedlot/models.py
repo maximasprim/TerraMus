@@ -39,6 +39,7 @@ class IntakeBatch(Base, UUIDPKMixin, TimestampMixin):
     other_fees: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
     handlers_cost: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    target_weight_kg: Mapped[float | None] = mapped_column(Numeric(8, 2), nullable=True)   # market-ready weight for this batch (Weights page)
 
     @property
     def landed_cost(self) -> float:

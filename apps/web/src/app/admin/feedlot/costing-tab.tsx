@@ -408,11 +408,8 @@ function OverheadEditor({ doc, busy, onSave }: EP) {
 // --------------------------------------------------------------- thresholds
 const SETTING_GROUPS: { title: string; help: string; fields: { key: string; label: string; def: number; hint: string }[] }[] = [
   { title: "When is an animal ready to sell?", help: "", fields: [
-    { key: "market_ready_kg", label: "Market-ready weight (kg)", def: 300, hint: "An animal at or above this weight is shown green and counted as ready to sell." }] },
-  { title: "How good is the growth rate (ADG)?", help: "ADG is average daily gain: kg gained per day. These four numbers set the colours.", fields: [
-    { key: "adg_poor_max", label: "Poor: ADG at or below", def: 0.2, hint: "At or below this the growth is shown red (poor)." },
-    { key: "adg_target_min", label: "On target: ADG from", def: 0.4, hint: "From here up to the next box is on target (green). Between 'poor' and this number is 'below target'." },
-    { key: "adg_target_max", label: "On target: ADG up to", def: 0.7, hint: "Above this the growth is excellent (cyan)." },
+    { key: "market_ready_kg", label: "Fallback market-ready weight (kg)", def: 300, hint: "Only used for animals with no target weight. Animals follow their own target, or their batch target (set on the batch or on the Weights page), exactly as in the Weights report." }] },
+  { title: "How good is the growth rate (ADG)?", help: "ADG is average daily gain: kg gained per day. Growth bands follow the Weights report: above 1.25 excellent, 0.9 to 1.25 on target, 0.6 to 0.9 approaching target, below 0.6 below target.", fields: [
     { key: "interval_gain_good", label: "Good gain between weigh-ins: over (kg)", def: 20, hint: "A gain bigger than this since the previous weighing is highlighted cyan." }] },
   { title: "Money and data checks", help: "", fields: [
     { key: "reference_price_per_kg", label: "Reference price per kg (KES)", def: 320, hint: "Used to estimate the value of animals that are not sold yet." },

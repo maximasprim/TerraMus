@@ -48,7 +48,7 @@ interface ImportReport {
 
 const kes = (n: number | null | undefined) => (n == null ? "-" : new Intl.NumberFormat("en-KE", { maximumFractionDigits: 0 }).format(n));
 const BAND_STYLE: Record<string, string> = {
-  poor: "bg-red-100 text-red-800", below_target: "bg-amber-100 text-amber-800", on_target: "bg-green-100 text-green-800", excellent: "bg-cyan-100 text-cyan-800",
+  poor: "bg-red-100 text-red-800", below_target: "bg-red-100 text-red-800", approaching_target: "bg-amber-100 text-amber-800", on_target: "bg-green-100 text-green-800", excellent: "bg-cyan-100 text-cyan-800",
 };
 const errMsg = (e: unknown, fallback: string) => (e instanceof ApiError ? e.message : fallback);
 type Tab = "overview" | "batches" | "weigh" | "sales" | "costing" | "worksheet";
@@ -101,7 +101,7 @@ function Overview() {
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         <StatCard label="On farm" value={String(s.active)} hint={`${s.head} ever received`} />
-        <StatCard label="Market-ready" value={String(s.market_ready)} hint="at or above target weight" />
+        <StatCard label="Market-ready" value={String(s.market_ready)} hint="at or above each animal's target weight" />
         <StatCard label="Avg ADG (kg/day)" value={s.avg_adg_active == null ? "-" : s.avg_adg_active.toFixed(2)} hint="active animals" />
         <StatCard label="Sold / lost" value={`${s.sold} / ${s.culled + s.died}`} hint="sold / culled + died" />
       </div>

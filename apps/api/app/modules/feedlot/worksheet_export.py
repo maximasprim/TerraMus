@@ -88,7 +88,8 @@ def _color_rules(ws, rng: str, first_cell: str, kind: str, s: dict) -> None:
     elif kind == "gain":
         ws.conditional_formatting.add(rng, FormulaRule(formula=[f"AND({n},{first_cell}>{s['interval_gain_good']})"], fill=CYAN))
     elif kind == "adg":
-        ws.conditional_formatting.add(rng, FormulaRule(formula=[f"AND({n},{first_cell}<={s['adg_poor_max']})"], fill=RED))
+        ws.conditional_formatting.add(rng, FormulaRule(formula=[f"AND({n},{first_cell}<{s['adg_approaching_min']})"], fill=RED))
+        ws.conditional_formatting.add(rng, FormulaRule(formula=[f"AND({n},{first_cell}>={s['adg_approaching_min']},{first_cell}<{s['adg_target_min']})"], fill=YELLOW))
         ws.conditional_formatting.add(rng, FormulaRule(formula=[f"AND({n},{first_cell}>={s['adg_target_min']},{first_cell}<={s['adg_target_max']})"], fill=GREEN))
         ws.conditional_formatting.add(rng, FormulaRule(formula=[f"AND({n},{first_cell}>{s['adg_target_max']})"], fill=CYAN))
 
@@ -711,15 +712,16 @@ def build_analytics(wb, b: Bundle) -> None:
     _table(ws2, 3, ["Sale batch", "Head", "Avg sale wt (kg)", "Price per kg", "Revenue", "Total cost", "Profit", "Profit / head", "Avg days", "Avg ADG",
                     "Avg pre-sale shrink (kg)", "Break-even price per kg"], rows, {4: "0.00", 5: "#,##0", 6: "#,##0", 7: "#,##0", 8: "#,##0", 10: "0.00", 12: "0.00"})
     ws3 = wb.create_sheet("ANALYTICS - Action list")
-    put(ws3, 1, 1, f"ACTIVE ANIMALS - what needs attention (as at {b.as_of.strftime('%d/%m/%Y')}; market-ready = {b.s['market_ready_kg']} kg)", bold=True, border=False)
-    order = {"poor": 0, "below_target": 1, "on_target": 2, "excellent": 3, None: 4}
+    put(ws3, 1, 1, f"ACTIVE ANIMALS - what needs attention (as at {b.as_of.strftime('%d/%m/%Y')}; market-ready = each animal's target weight; {b.s['market_ready_kg']} kg where none is set)", bold=True, border=False)
+    order = {"poor": 0, "below_target": 1, "approaching_target": 2, "on_target": 3, "excellent": 4, None: 5}
     act = [x for x in A["animals"] if x["status"] == "active"]
     act.sort(key=lambda x: (not x["market_ready"], order.get(x["adg_band"], 4), x["tag"]))
     rows = [[x["tag"], f"BATCH {x['intake_batch']}", x["latest_weight"], x["latest_weigh_date"], x["days_on_farm"], x["adg"], (x["adg_band"] or "").replace("_", " "),
              "READY" if x["market_ready"] else "", x["est_days_to_market"], ", ".join(x["flags"])] for x in act]
     end = _table(ws3, 3, ["Animal No.", "Batch", "Latest weight (kg)", "Last weighed", "Days on farm", "ADG", "ADG band", "Market-ready", "Est. days to market", "Flags"], rows, {6: "0.00"})
     if rows:
-        ws3.conditional_formatting.add(f"G4:G{end}", FormulaRule(formula=['G4="poor"'], fill=RED))
+        ws3.conditional_formatting.add(f"G4:G{end}", FormulaRule(formula=['OR(G4="poor",G4="below target")'], fill=RED))
+        ws3.conditional_formatting.add(f"G4:G{end}", FormulaRule(formula=['G4="approaching target"'], fill=YELLOW))
         ws3.conditional_formatting.add(f"G4:G{end}", FormulaRule(formula=['G4="on target"'], fill=GREEN))
         ws3.conditional_formatting.add(f"G4:G{end}", FormulaRule(formula=['G4="excellent"'], fill=CYAN))
         ws3.conditional_formatting.add(f"H4:H{end}", FormulaRule(formula=['H4="READY"'], fill=GREEN))
@@ -729,7 +731,7 @@ def build_notes(wb, b: Bundle, corrections: list[str]) -> None:
     ws = wb.create_sheet("DATA NOTES")
     put(ws, 1, 1, "HOW THIS WORKBOOK DIFFERS FROM THE MANUAL VERSION", bold=True, border=False)
     notes = corrections + ["",
-        f"Thresholds used: market-ready >= {b.s['market_ready_kg']} kg; ADG red <= {b.s['adg_poor_max']}, green {b.s['adg_target_min']}-{b.s['adg_target_max']}, cyan > {b.s['adg_target_max']}; interval gain cyan > {b.s['interval_gain_good']} kg.",
+        f"Thresholds used: market-ready = animal/batch target weight ({b.s['market_ready_kg']} kg if none set); ADG red < {b.s['adg_approaching_min']}, yellow {b.s['adg_approaching_min']}-{b.s['adg_target_min']}, green {b.s['adg_target_min']}-{b.s['adg_target_max']}, cyan > {b.s['adg_target_max']}; interval gain cyan > {b.s['interval_gain_good']} kg.",
         f"Days on farm = date difference - {b.s['day_offset']} (the worksheet's convention).",
         "Sheets after 'Profitability per Bull'/' PROFITABILITY ' (ANALYTICS - ..., DATA NOTES) are additions; every original sheet keeps its name, order and columns.",
         "This file can be imported back into the system: the importer reads BATCH n, Sales weight Batch n, the register and the costing sheets."]

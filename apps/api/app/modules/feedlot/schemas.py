@@ -19,6 +19,7 @@ class IntakeBatchBase(BaseModel):
     handlers_cost: Decimal = Field(default=Decimal("0"), ge=0)
     notes: str | None = None
     production_cycle_id: uuid.UUID | None = None
+    target_weight_kg: Decimal | None = Field(default=None, gt=0, le=2000)
 
 
 class IntakeBatchCreate(IntakeBatchBase):
@@ -38,6 +39,7 @@ class IntakeBatchUpdate(BaseModel):
     handlers_cost: Decimal | None = Field(default=None, ge=0)
     notes: str | None = None
     production_cycle_id: uuid.UUID | None = None
+    target_weight_kg: Decimal | None = Field(default=None, gt=0, le=2000)
 
 
 class IntakeBatchOut(BaseModel):
@@ -58,6 +60,7 @@ class IntakeBatchOut(BaseModel):
     landed_cost: float
     landed_cost_per_head: float
     production_cycle_id: uuid.UUID | None = None
+    target_weight_kg: Decimal | None = None
     head_registered: int = 0
     head_active: int = 0
 

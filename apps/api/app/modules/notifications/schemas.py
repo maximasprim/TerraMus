@@ -31,6 +31,8 @@ class ScheduledChecksResult(BaseModel):
     payments_review_notified: int = 0
     training_notified: int = 0
     fodder_notified: int = 0
+    weights_ready_notified: int = 0
+    weights_nearly_ready_notified: int = 0
 
 
 class EmailOutboxOut(BaseModel):

@@ -16,9 +16,9 @@ def test_days_on_farm_uses_worksheet_minus_one_convention():
     assert m.days_on_farm(date(2026, 1, 1), date(2026, 1, 1)) == 0        # never negative
 
 
-@pytest.mark.parametrize("adg,band", [(0.1, "poor"), (0.2, "poor"), (0.3, "below_target"),
-                                      (0.4, "on_target"), (0.7, "on_target"), (0.71, "excellent"), (None, None)])
-def test_adg_bands_match_worksheet_colour_rules(adg, band):
+@pytest.mark.parametrize("adg,band", [(0.1, "below_target"), (0.59, "below_target"), (0.6, "approaching_target"), (0.89, "approaching_target"),
+                                      (0.9, "on_target"), (1.25, "on_target"), (1.26, "excellent"), (None, None)])
+def test_adg_bands_match_the_weights_report(adg, band):
     assert m.adg_band(adg, S) == band
 
 
@@ -90,7 +90,7 @@ def test_active_animal_performance_matches_worksheet_row():
     assert (p["overall_gain"], p["days_on_farm"]) == (128.0, 228)
     assert p["adg"] == pytest.approx(0.5614, abs=1e-4)
     assert p["pct_gain"] == pytest.approx(0.5792, abs=1e-4)
-    assert p["adg_band"] == "on_target" and p["market_ready"] is True
+    assert p["adg_band"] == "below_target" and p["market_ready"] is True   # 0.56 < 0.6; 349 >= fallback 300
 
 
 def test_sold_animal_uses_sale_weight_and_reports_presale_shrink():
@@ -132,3 +132,18 @@ def test_resolve_feed_costs_follows_links_over_manual_values():
                                 "cost_links": {"hay": {"kind": "enterprise_budget", "name": "Hay"},
                                                "concentrate": {"kind": "recipe", "name": "Conc"}}}, budgets, recipes)
     assert out["hay"] == 1.0 and out["water"] == 0.1 and out["concentrate"] == 30.0
+
+
+def test_market_ready_follows_the_animal_or_batch_target_not_a_fixed_weight():
+    ws = [(date(2026, 1, 1), 250.0), (date(2026, 3, 1), 340.0)]
+    base = dict(entry_weight=250.0, weights=ws)
+    # no target -> fallback 300 kg
+    p = m.animal_performance(_animal(**base), date(2026, 3, 2), S)
+    assert p["market_ready"] is True and p["target_source"] == "default" and p["target_weight"] == 300
+    # target 400 -> not ready yet, days to market projected from recent gain (60 kg / 1.5 per day)
+    a = _animal(**base); a.target_weight, a.target_source = 400.0, "batch"
+    p = m.animal_performance(a, date(2026, 3, 2), S)
+    assert p["market_ready"] is False and p["target_source"] == "batch" and p["est_days_to_market"] == 40
+    # target 330 -> ready
+    a.target_weight = 330.0
+    assert m.animal_performance(a, date(2026, 3, 2), S)["market_ready"] is True

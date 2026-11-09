@@ -41,6 +41,7 @@ AREAS: dict[str, tuple[str, ...]] = {
     "/api/v1/dairy": ("/admin/livestock",),
     "/api/v1/crops": ("/admin/crops",),
     "/api/v1/feedlot": ("/admin/feedlot",),
+    "/api/v1/weights": ("/admin/weights",),
     "/api/v1/groups": ("/admin/groups",),
     "/api/v1/fodder": ("/admin/fodder",),
     "/api/v1/production-cycles": ("/admin/cycles", "/admin/feedlot"),  # Feedlot adopts/assigns records to cycles too

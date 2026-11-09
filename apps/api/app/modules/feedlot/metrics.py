@@ -15,14 +15,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date
+import math
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Iterable
 
+from app.modules.weights import logic as wlogic
+
 DEFAULT_SETTINGS: dict[str, Any] = {
-    "market_ready_kg": 300,       # worksheet colours weights >= 300 green
-    "adg_poor_max": 0.2,          # ADG <= 0.2 -> red
-    "adg_target_min": 0.4,        # 0.4 .. 0.7 -> green
-    "adg_target_max": 0.7,        # > 0.7 -> excellent (cyan)
+    "market_ready_kg": 300,       # FALLBACK only: used for animals with no target weight (animal or batch)
+    "adg_poor_max": None,         # no separate "poor" band any more: bands follow the Weights report
+    "adg_approaching_min": 0.6,   # ADG 0.6 - 0.9 -> approaching target (pinned to weights.logic, see get_settings)
+    "adg_target_min": 0.9,        # ADG 0.9 - 1.25 -> on target        (pinned to weights.logic)
+    "adg_target_max": 1.25,       # ADG above 1.25 -> excellent        (pinned to weights.logic)
     "interval_gain_good": 20,     # interval gain > 20 kg -> cyan
     "day_offset": 1,              # days_on_farm = date diff - day_offset
     "reference_price_per_kg": 320,
@@ -44,6 +48,12 @@ def q2(v: float | Decimal) -> Decimal:
 def get_settings(overrides: dict | None) -> dict[str, Any]:
     s = dict(DEFAULT_SETTINGS)
     s.update({k: v for k, v in (overrides or {}).items() if v is not None})
+    # Growth bands are shared with the Weights report so both screens always give the same answer; any old
+    # saved ADG thresholds are ignored.
+    s["adg_poor_max"] = None
+    s["adg_approaching_min"] = wlogic.APPROACHING_ADG
+    s["adg_target_min"] = wlogic.ON_TARGET_ADG
+    s["adg_target_max"] = wlogic.EXCELLENT_ADG
     return s
 
 
@@ -51,17 +61,9 @@ def days_on_farm(received_on: date, end_on: date, offset: int = 1) -> int:
     return max((end_on - received_on).days - offset, 0)
 
 
-def adg_band(adg: float | None, s: dict[str, Any]) -> str | None:
-    """poor (<=0.2) | below_target (0.2-0.4) | on_target (0.4-0.7) | excellent (>0.7)."""
-    if adg is None:
-        return None
-    if adg <= s["adg_poor_max"]:
-        return "poor"
-    if adg < s["adg_target_min"]:
-        return "below_target"
-    if adg <= s["adg_target_max"]:
-        return "on_target"
-    return "excellent"
+def adg_band(adg: float | None, s: dict[str, Any] | None = None) -> str | None:
+    """excellent (> 1.25) | on_target (0.9 - 1.25) | approaching_target (0.6 - 0.9) | below_target (< 0.6): the same rule as the Weights report."""
+    return wlogic.adg_band(adg)
 
 
 # --------------------------------------------------------------------- costing
@@ -153,6 +155,9 @@ class AnimalInput:
     intake_batch: int | None = None
     sale_batch: int | None = None
     landed_cost: float = 0.0
+    target_weight: float | None = None         # animal target, else its intake batch's target (None = use fallback)
+    target_source: str | None = None           # "animal" | "batch" | None
+    hold_reason: str | None = None             # unhealthy / quarantined: ready is shown but not alerted
 
 
 def animal_performance(a: AnimalInput, as_of: date, s: dict[str, Any]) -> dict[str, Any]:
@@ -179,9 +184,15 @@ def animal_performance(a: AnimalInput, as_of: date, s: dict[str, Any]) -> dict[s
     shrink = None
     if exited and a.exit_type == "sold" and a.exit_weight is not None and last_w is not None:
         shrink = round(a.exit_weight - last_w, 2)   # negative => weight lost before sale
+    # Same measures as the Weights report: target per animal/batch, growth band from the recent daily gain.
+    target = a.target_weight if a.target_weight else _f(s["market_ready_kg"])
+    target_source = a.target_source if a.target_weight else "default"
+    pts = wlogic.daily_points(ws)
+    recent = wlogic.recent_adg(pts)
+    trend = recent if recent is not None else wlogic.overall_adg(pts)
     est_days_to_market = None
-    if (not exited) and last_w is not None and adg and adg > 0 and last_w < s["market_ready_kg"]:
-        est_days_to_market = int(round((s["market_ready_kg"] - last_w) / adg))
+    if (not exited) and last_w is not None and trend and trend > 0 and last_w < target:
+        est_days_to_market = int(math.ceil((target - last_w) / trend))
     return {
         "animal_id": a.animal_id, "tag": a.tag, "intake_batch": a.intake_batch, "sale_batch": a.sale_batch,
         "received_on": a.received_on.isoformat(), "entry_weight": entry,
@@ -190,8 +201,11 @@ def animal_performance(a: AnimalInput, as_of: date, s: dict[str, Any]) -> dict[s
         "overall_gain": round(gain, 2) if gain is not None else None,
         "adg": round(adg, 4) if adg is not None else None,
         "pct_gain": round(gain / entry, 4) if (gain is not None and entry) else None,
-        "adg_band": adg_band(adg, s),
-        "market_ready": bool(last_w is not None and last_w >= s["market_ready_kg"] and not exited),
+        "adg_band": adg_band(trend if not exited else adg),
+        "recent_adg": round(recent, 3) if recent is not None else None,
+        "target_weight": round(target, 2), "target_source": target_source,
+        "market_ready": bool(last_w is not None and last_w >= target and not exited),
+        "ready_hold": a.hold_reason if (last_w is not None and last_w >= target and not exited) else None,
         "status": (a.exit_type if exited else "active"), "presale_shrink_kg": shrink,
         "est_days_to_market": est_days_to_market, "intervals": intervals, "flags": flags,
     }

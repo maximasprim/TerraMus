@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimalPerformance } from "@/components/weights/animal-performance";
 import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -126,6 +127,7 @@ export default function AnimalDetailPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["animal", id, "weights"] });
       queryClient.invalidateQueries({ queryKey: ["animal", id] }); // current_weight changes
+      queryClient.invalidateQueries({ queryKey: ["weights"] });    // charts and readiness on the Weights page
       setWeightModalOpen(false);
       setWeightFormError(null);
     },
@@ -430,6 +432,12 @@ export default function AnimalDetailPage() {
               + Record weight
             </Button></Can>
           </div>
+          <Can permission="weights.view">
+            <Card className="mb-4 p-4 sm:p-6">
+              <h2 className="mb-3 font-display text-lg text-forest">Performance</h2>
+              <AnimalPerformance animalId={id} showTable={false} />
+            </Card>
+          </Can>
           <Card className="p-4 sm:p-6">
             {weightsQuery.isLoading && <p className="text-sm text-muted">Loading…</p>}
             {weightsQuery.data && weightsQuery.data.length === 0 && (

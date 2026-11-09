@@ -627,6 +627,15 @@ def _as_uuid(v) -> uuid.UUID | None:
         return None
 
 
+def _target_of(animal, ib) -> tuple[float | None, str | None]:
+    """Same resolution as the Weights report: the animal's own target, else its intake batch's."""
+    if animal.target_weight:
+        return float(animal.target_weight), "animal"
+    if ib is not None and ib.target_weight_kg:
+        return float(ib.target_weight_kg), "batch"
+    return None, None
+
+
 async def _load(db, org_id, cycle: CycleSel | None = None, intake_batch_id=None,
                 sale_batch_id=None) -> list[tuple[metrics.AnimalInput, dict]]:
     """Every feedlot animal with its weights and exit. The optional filters are applied in SQL so a screen for one
@@ -666,7 +675,10 @@ async def _load(db, org_id, cycle: CycleSel | None = None, intake_batch_id=None,
             exit_date=ex.exit_date if ex else None,
             exit_weight=float(ex.exit_weight_kg) if ex and ex.exit_weight_kg is not None else None,
             exit_amount=float(ex.amount) if ex else 0.0, intake_batch=ib.batch_number,
-            sale_batch=sb.batch_number if sb else None, landed_cost=ib.landed_cost_per_head)
+            sale_batch=sb.batch_number if sb else None, landed_cost=ib.landed_cost_per_head,
+            target_weight=_target_of(animal, ib)[0], target_source=_target_of(animal, ib)[1],
+            hold_reason=("In quarantine" if animal.status == "quarantined"
+                         else (f"Health: {animal.health_status}" if animal.health_status != "healthy" else None)))
         out.append((inp, {"intake_batch_id": str(ib.id), "sale_batch_id": str(sb.id) if sb else None,
                           "animal_status": animal.status, "ear_tag": animal.ear_tag,
                           "production_cycle_id": str(ib.production_cycle_id) if ib.production_cycle_id else None}))
@@ -706,7 +718,7 @@ async def performance(db, org_id, as_of: date | None = None, intake_batch_id=Non
         "culled": sum(p["status"] == "culled" for p in animals), "died": sum(p["status"] == "died" for p in animals),
         "market_ready": sum(p["market_ready"] for p in active),
         "avg_adg_active": round(sum(adgs) / len(adgs), 3) if adgs else None,
-        "by_adg_band": {b: sum(1 for p in active if p["adg_band"] == b) for b in ("poor", "below_target", "on_target", "excellent")},
+        "by_adg_band": {b: sum(1 for p in active if p["adg_band"] == b) for b in ("below_target", "approaching_target", "on_target", "excellent")},
         "no_recent_weight": [p["tag"] for p in active if not p["latest_weigh_date"] or p["latest_weigh_date"] < stale_cut],
         "flagged": [{"tag": p["tag"], "flags": p["flags"]} for p in animals if p["flags"]],
     }

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createContext, useContext, useEffect } from "react";
 import { clsx } from "clsx";
-import { LayoutDashboard, BarChart3, Beef, Sprout, LogOut, MapPin, Users, Wheat, ShoppingCart, Tag, Package, Wallet, Truck, UserCog, Wrench, Search, Settings, UsersRound, CalendarClock, Bell, Newspaper, CreditCard, ExternalLink, Inbox, History, Bird, Scale, Receipt, Fuel, GraduationCap, Star, Layers } from "lucide-react";
+import { LayoutDashboard, BarChart3, Beef, Sprout, LogOut, MapPin, Users, Wheat, ShoppingCart, Tag, Package, Wallet, Truck, UserCog, Wrench, Search, Settings, UsersRound, CalendarClock, Bell, Newspaper, CreditCard, ExternalLink, Inbox, History, Bird, Scale, Receipt, Fuel, GraduationCap, Star, Layers, TrendingUp } from "lucide-react";
 import { useRequireAuth, useLogout, isCustomerOnly } from "@/lib/use-auth";
 import { canAccessPath, firstAccessiblePath } from "@/lib/permissions";
 import { useCatalog } from "@/lib/use-catalog";
@@ -21,6 +21,7 @@ const NAV = [
   { href: "/admin/livestock", label: "Livestock", icon: Beef },
   { href: "/admin/cycles", label: "Production Cycles", icon: Layers },
   { href: "/admin/feedlot", label: "Feedlot", icon: Scale },
+  { href: "/admin/weights", label: "Weights", icon: TrendingUp },
   { href: "/admin/groups", label: "Flocks & Fish", icon: Bird },
   { href: "/admin/fodder", label: "Fodder", icon: Wheat },
   { href: "/admin/crops", label: "Crops", icon: Sprout },
