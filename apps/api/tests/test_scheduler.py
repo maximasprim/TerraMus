@@ -53,15 +53,16 @@ async def test_vaccination_alert_names_the_animal_and_does_not_repeat_every_day(
 async def test_feedlot_alerts_unweighed_and_market_ready_then_quiet(client, engine):
     h, farm, org_id = await _org(client, "sc2@example.com")
     b = (await client.post("/api/v1/feedlot/intake-batches", headers=h, json={"delivered_on": "2026-01-01", "farm_id": farm, "head_purchased": 2, "purchase_cost": "100000"})).json()
-    await client.post(f"/api/v1/feedlot/intake-batches/{b['id']}/animals", headers=h, json={"animals": [{"animal_number": "F01", "entry_weight_kg": 320}, {"animal_number": "F02", "entry_weight_kg": 200}]})
+    await client.post(f"/api/v1/feedlot/intake-batches/{b['id']}/animals", headers=h, json={"animals": [{"animal_number": "F01", "entry_weight_kg": 420}, {"animal_number": "F02", "entry_weight_kg": 200}]})
     r = (await client.post(RUN, headers=h)).json()
-    assert r["feedlot_unweighed_notified"] == 1 and r["feedlot_market_ready_notified"] == 1
+    assert r["feedlot_unweighed_notified"] == 1 and r["feedlot_market_ready_notified"] == 0   # ready alerts come from Weights now
+    assert r["weights_ready_notified"] == 1
     titles = await _titles(client, h)
     assert "Animals overdue for weighing" in titles and "Animals ready for market" in titles
     msg = next(n["body"] for n in (await client.get("/api/v1/notifications", headers=h)).json() if n["title"] == "Animals ready for market")
     assert "F01" in msg and "F02" not in msg
     again = (await client.post(RUN, headers=h)).json()
-    assert again["feedlot_unweighed_notified"] == 0 and again["feedlot_market_ready_notified"] == 0
+    assert again["feedlot_unweighed_notified"] == 0 and again["weights_ready_notified"] == 0
 
 
 async def test_overdue_receivables_alert(client, engine):

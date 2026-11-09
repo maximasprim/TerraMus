@@ -65,3 +65,26 @@ def test_stale_weighing_is_flagged_and_summary_counts():
     assert "stale_weight" in a["flags"]
     s = logic.summarise([a, logic.assess(pts((0, 300), (20, 340)), 450, 300, D + timedelta(days=21))])
     assert s["head"] == 2 and s["avg_adg"] is not None and sum(s["stages"].values()) == 2
+
+
+def test_schedule_against_target_days():
+    from datetime import date, timedelta
+    start = date(2026, 1, 1)
+    pts = [(start, 200.0), (start + timedelta(days=30), 245.0)]          # 1.5 kg/day
+    today = start + timedelta(days=30)
+    # 400 kg needs 103.3 days more at 1.5/day -> ready on day ~134; plan of 150 days: on schedule
+    ok = logic.assess(pts, 400, 200, today, start_date=start, target_days=150)
+    assert ok["schedule"] == "on_schedule" and ok["days_on_farm"] == 30 and ok["days_left"] == 120
+    assert ok["plan_adg"] == 1.333 and ok["required_adg"] == round(155 / 120, 3) and ok["deadline"] == "2026-05-31"
+    # plan of 100 days: it will arrive late
+    late = logic.assess(pts, 400, 200, today, start_date=start, target_days=100)
+    assert late["schedule"] == "behind" and late["days_late"] > 0
+    # days used up and not at target
+    over = logic.assess(pts, 400, 200, start + timedelta(days=130), start_date=start, target_days=120)
+    assert over["schedule"] == "overdue"
+    # already at the target weight
+    done = logic.assess([(start, 200.0), (start + timedelta(days=60), 410.0)], 400, 200, start + timedelta(days=60), start_date=start, target_days=150)
+    assert done["schedule"] == "achieved"
+    # no target days: nothing is said about the schedule
+    none = logic.assess(pts, 400, 200, today, start_date=start)
+    assert none["schedule"] is None and none["target_days"] is None

@@ -11,7 +11,7 @@ import { useCan } from "@/lib/use-auth";
 import { filterWeightRows, NO_WEIGHT_FILTERS, sortWeightRows, type WeightFilters, type WeightSortKey } from "@/lib/weights-view";
 import {
   adgText, BAND_CHIP, BAND_LABEL, fullDate, kg, shortDate, STAGE_CHIP, STAGE_LABEL,
-  type DailyWeights, type Stage, type WeightRow, type WeightsOverview,
+  SCHEDULE_CHIP, SCHEDULE_LABEL, type DailyWeights, type Stage, type WeightRow, type WeightsOverview,
 } from "@/lib/weights-types";
 
 type Tab = "readiness" | "daily" | "batches";
@@ -43,11 +43,12 @@ export default function WeightsPage() {
   );
 }
 
-function StageChip({ r }: { r: Pick<WeightRow, "stage" | "hold_reason"> }) {
+function StageChip({ r }: { r: Pick<WeightRow, "stage" | "hold_reason"> & Partial<Pick<WeightRow, "schedule" | "days_on_farm" | "target_days" | "days_late">> }) {
   return (
     <span className="inline-flex flex-wrap items-center gap-1">
       <span className={`whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-medium ${STAGE_CHIP[r.stage]}`}>{STAGE_LABEL[r.stage]}</span>
       {r.hold_reason && <span className="whitespace-nowrap rounded-full bg-clay/15 px-2 py-0.5 text-xs text-clay" title="Held back from alerts until healthy">{r.hold_reason}</span>}
+      {r.schedule && <span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-xs ${SCHEDULE_CHIP[r.schedule]}`} title={r.target_days ? `Day ${r.days_on_farm ?? 0} of ${r.target_days}` : undefined}>{SCHEDULE_LABEL[r.schedule]}{r.schedule === "behind" && r.days_late ? ` ~${r.days_late}d` : ""}</span>}
     </span>
   );
 }
@@ -94,7 +95,7 @@ function Readiness({ data }: { data: WeightsOverview }) {
         <StatCard label="Ready for market" value={String(s.stages.ready ?? 0)} hint={s.ready_on_hold ? `${s.ready_on_hold} on a health hold` : "at or above target weight"} />
         <StatCard label="Nearly ready" value={String(s.stages.nearly_ready ?? 0)} hint={`within ${data.thresholds.nearly_ready_days} days at the current gain`} />
         <StatCard label="Average daily gain" value={s.avg_adg == null ? "-" : s.avg_adg.toFixed(2)} hint={`${s.bands.below_target ?? 0} below ${data.thresholds.approaching_from} kg/day`} />
-        <StatCard label="With a target" value={`${withTarget} / ${s.head}`} hint="set targets on the Batches tab" />
+        <StatCard label="With a target" value={`${withTarget} / ${s.head}`} hint={`${(s.schedule?.behind ?? 0) + (s.schedule?.overdue ?? 0)} behind schedule · default ${data.default_target_kg} kg`} />
       </div>
 
       <Card className="p-4 sm:p-6">
@@ -109,9 +110,10 @@ function Readiness({ data }: { data: WeightsOverview }) {
             {data.batch_options.map((b) => <option key={b.id} value={b.id}>{b.label}</option>)}
           </Select>
           <Button variant="ghost" onClick={() => downloadCsv("weights-readiness.csv", [
-            ["Tag", "Batch", "Latest kg", "Last weighed", "Target kg", "Remaining kg", "Progress %", "Daily gain", "Band", "Expected ready", "Stage"],
+            ["Tag", "Batch", "Latest kg", "Last weighed", "Target kg", "Remaining kg", "Progress %", "Daily gain", "Band", "Expected ready", "Stage", "Target days", "Days on farm", "Schedule"],
             ...rows.map((r) => [r.tag, r.batch ?? "", r.current_kg ?? "", r.last_weighed ?? "", r.target_kg ?? "", r.remaining_kg ?? "", r.progress_pct ?? "", r.adg ?? "",
-              r.adg_band ? BAND_LABEL[r.adg_band] : "", r.est_ready_date ?? "", STAGE_LABEL[r.stage] + (r.hold_reason ? ` (${r.hold_reason})` : "")]),
+              r.adg_band ? BAND_LABEL[r.adg_band] : "", r.est_ready_date ?? "", STAGE_LABEL[r.stage] + (r.hold_reason ? ` (${r.hold_reason})` : ""),
+              r.target_days ?? "", r.days_on_farm ?? "", r.schedule ? SCHEDULE_LABEL[r.schedule] : ""]),
           ])}>Download CSV</Button>
         </div>
         {rows.length === 0 ? <p className="py-8 text-center text-sm text-muted">No animals match.</p> : (
@@ -125,7 +127,7 @@ function Readiness({ data }: { data: WeightsOverview }) {
                       <span className="font-medium text-ink">{r.tag}</span><span className="text-lg font-medium text-ink">{kg(r.current_kg)}</span>
                     </div>
                     <div className="mt-0.5 flex items-center justify-between gap-3 text-xs text-muted">
-                      <span>{r.batch ?? "No batch"}</span><span>{r.target_kg ? `target ${kg(r.target_kg, 0)}` : "no target"}</span>
+                      <span>{r.batch ?? "No batch"}</span><span>{r.target_kg ? `target ${kg(r.target_kg, 0)}${r.target_days ? ` · ${r.days_on_farm ?? 0}/${r.target_days} days` : ""}` : "no target"}</span>
                     </div>
                     <div className="mt-2 flex flex-wrap items-center gap-2"><StageChip r={r} /><AdgCell r={r} /></div>
                     {r.progress_pct != null && <div className="mt-2"><Progress pct={r.progress_pct} /></div>}
@@ -145,7 +147,7 @@ function Readiness({ data }: { data: WeightsOverview }) {
                       <td className="py-2 pr-3"><button type="button" className="font-medium text-forest hover:underline" onClick={(e) => { e.stopPropagation(); setOpen(r); }}>{r.tag}</button>
                         <div className="text-xs text-muted">{r.batch ?? "No batch"}</div></td>
                       <td className="whitespace-nowrap py-2 pr-3"><span className="font-medium text-ink">{kg(r.current_kg)}</span><div className="text-xs text-muted">{r.last_weighed ? shortDate(r.last_weighed) : "never weighed"}</div></td>
-                      <td className="whitespace-nowrap py-2 pr-3">{r.target_kg ? <>{kg(r.target_kg, 0)}<div className="text-xs text-muted">{r.target_source === "animal" ? "own target" : "batch target"}</div></> : <span className="text-muted">-</span>}</td>
+                      <td className="whitespace-nowrap py-2 pr-3">{r.target_kg ? <>{kg(r.target_kg, 0)}<div className="text-xs text-muted">{r.target_source === "animal" ? "own target" : r.target_source === "default" ? "default target" : "batch target"}</div></> : <span className="text-muted">-</span>}</td>
                       <td className="py-2 pr-3"><Progress pct={r.progress_pct} /></td>
                       <td className="py-2 pr-3"><AdgCell r={r} /></td>
                       <td className="whitespace-nowrap py-2 pr-3">{r.stage === "ready" ? "Now" : r.est_ready_date ? <>{shortDate(r.est_ready_date)}<div className="text-xs text-muted">{r.days_to_ready === 0 ? "any day now" : `~${r.days_to_ready} days`}</div></> : <span className="text-muted">-</span>}</td>
@@ -224,28 +226,35 @@ function Batches({ data }: { data: WeightsOverview }) {
   const can = useCan();
   const qc = useQueryClient();
   const [edits, setEdits] = useState<Record<string, string>>({});
+  const [dayEdits, setDayEdits] = useState<Record<string, string>>({});
   const [err, setErr] = useState<string | null>(null);
   const save = useMutation({
-    mutationFn: ({ id, value }: { id: string; value: number | null }) => apiFetch(`/api/v1/weights/batches/${id}/target`, { method: "PUT", body: JSON.stringify({ target_weight_kg: value }) }),
-    onSuccess: (_d, v) => { setEdits((p) => { const n = { ...p }; delete n[v.id]; return n; }); setErr(null); void qc.invalidateQueries({ queryKey: ["weights"] }); void qc.invalidateQueries({ queryKey: ["feedlot"] }); },
+    mutationFn: ({ id, value, days }: { id: string; value: number | null; days: number | null }) => apiFetch(`/api/v1/weights/batches/${id}/target`, { method: "PUT", body: JSON.stringify({ target_weight_kg: value, target_days: days }) }),
+    onSuccess: (_d, v) => { setEdits((p) => { const n = { ...p }; delete n[v.id]; return n; }); setDayEdits((p) => { const n = { ...p }; delete n[v.id]; return n; }); setErr(null); void qc.invalidateQueries({ queryKey: ["weights"] }); void qc.invalidateQueries({ queryKey: ["feedlot"] }); },
     onError: (e) => setErr(errMsg(e, "Could not save the target")),
   });
+  const daysFor = (id: string) => data.batch_options.find((b) => b.id === id)?.target_days ?? null;
   const targetFor = (id: string) => data.batch_options.find((b) => b.id === id)?.target_weight_kg ?? null;
   return (
+    <div className="space-y-6">
+    {can("weights.targets") && <Defaults data={data} />}
     <Card className="p-4 sm:p-6">
-      <p className="mb-4 text-sm text-muted">Set the market-ready weight for each intake batch. Every animal in the batch uses it, unless it has its own target (set from the animal’s row on the Readiness tab).</p>
+      <p className="mb-4 text-sm text-muted">Set the market-ready weight and the target days on the farm for each intake batch. Every animal in the batch uses them, unless it has its own (set from the animal’s row on the Readiness tab). Batches with no weight target use the default of {data.default_target_kg} kg.</p>
       {err && <div className="mb-3"><ErrorState message={err} /></div>}
       {data.batches.length === 0 ? <p className="text-sm text-muted">No batches yet.</p> : (
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead><tr className="border-b border-hairline text-xs uppercase tracking-wider text-muted">
-              <th className="pb-2 pr-3 font-medium">Batch</th><th className="pb-2 pr-3 font-medium">Head</th><th className="pb-2 pr-3 font-medium">Target weight</th>
+              <th className="pb-2 pr-3 font-medium">Batch</th><th className="pb-2 pr-3 font-medium">Head</th><th className="pb-2 pr-3 font-medium">Target weight</th><th className="pb-2 pr-3 font-medium">Target days</th>
               <th className="pb-2 pr-3 font-medium">Avg weight</th><th className="pb-2 pr-3 font-medium">Avg daily gain (kg)</th><th className="pb-2 pr-3 font-medium">Progress</th><th className="pb-2 font-medium">Ready / nearly</th></tr></thead>
             <tbody>
               {data.batches.map((b) => {
                 const id = b.batch_id;
                 const current = id ? targetFor(id) : null;
                 const val = id && id in edits ? edits[id] : current != null ? String(current) : "";
+                const curDays = id ? daysFor(id) : null;
+                const dval = id && id in dayEdits ? dayEdits[id] : curDays != null ? String(curDays) : "";
+                const dirty = !!id && (id in edits || id in dayEdits);
                 return (
                   <tr key={id ?? "none"} className="border-b border-hairline/60 align-top last:border-0">
                     <td className="py-2 pr-3 font-medium text-ink">{b.batch}</td>
@@ -256,9 +265,19 @@ function Batches({ data }: { data: WeightsOverview }) {
                           <input aria-label={`Target weight for ${b.batch}`} type="number" inputMode="decimal" min="1" step="0.5" placeholder="kg" value={val}
                             onChange={(e) => setEdits({ ...edits, [id]: e.target.value })}
                             className="w-24 rounded-md border border-hairline bg-white px-2 py-1.5 text-sm focus:border-brass focus:outline-none" />
-                          <Button disabled={save.isPending || !(id in edits)} className="px-3 py-1.5" onClick={() => save.mutate({ id, value: val === "" ? null : Number(val) })}>Save</Button>
+                          </div>
+                      ) : current != null ? kg(current, 0) : <span className="text-muted">{id ? `default ${data.default_target_kg} kg` : "-"}</span>}
+                    </td>
+                    <td className="py-2 pr-3">
+                      {id && can("weights.targets") ? (
+                        <div className="flex items-center gap-2">
+                          <input aria-label={`Target days on farm for ${b.batch}`} type="number" inputMode="numeric" min="1" step="1" placeholder="days" value={dval}
+                            onChange={(e) => setDayEdits({ ...dayEdits, [id]: e.target.value })}
+                            className="w-20 rounded-md border border-hairline bg-white px-2 py-1.5 text-sm focus:border-brass focus:outline-none" />
+                          <Button disabled={save.isPending || !dirty} className="px-3 py-1.5" onClick={() => save.mutate({ id, value: val === "" ? null : Number(val), days: dval === "" ? null : Number(dval) })}>Save</Button>
                         </div>
-                      ) : current != null ? kg(current, 0) : <span className="text-muted">{id ? "not set" : "-"}</span>}
+                      ) : curDays != null ? `${curDays} days` : <span className="text-muted">-</span>}
+                      {b.behind > 0 && <div className="mt-1 text-xs text-clay">{b.behind} behind schedule</div>}
                     </td>
                     <td className="whitespace-nowrap py-2 pr-3">{kg(b.avg_current_kg)}</td>
                     <td className="py-2 pr-3"><AdgCell r={{ adg: b.avg_adg, adg_band: b.adg_band }} /></td>
@@ -271,6 +290,35 @@ function Batches({ data }: { data: WeightsOverview }) {
           </table>
         </div>
       )}
+    </Card>
+    </div>
+  );
+}
+
+function Defaults({ data }: { data: WeightsOverview }) {
+  const qc = useQueryClient();
+  const [kgText, setKgText] = useState<string | null>(null);
+  const [daysText, setDaysText] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const kgVal = kgText ?? String(data.default_target_kg);
+  const daysVal = daysText ?? (data.default_target_days != null ? String(data.default_target_days) : "");
+  const save = useMutation({
+    mutationFn: () => apiFetch(`/api/v1/weights/defaults`, { method: "PUT", body: JSON.stringify({ target_weight_kg: Number(kgVal), target_days: daysVal === "" ? null : Number(daysVal) }) }),
+    onSuccess: () => { setKgText(null); setDaysText(null); setErr(null); void qc.invalidateQueries({ queryKey: ["weights"] }); void qc.invalidateQueries({ queryKey: ["feedlot"] }); },
+    onError: (e) => setErr(errMsg(e, "Could not save the defaults")),
+  });
+  const bad = !(Number(kgVal) > 0) || (daysVal !== "" && !(Number(daysVal) > 0));
+  return (
+    <Card className="p-4 sm:p-6">
+      <h3 className="font-display text-base text-forest">Default targets</h3>
+      <p className="mb-3 mt-1 text-sm text-muted">Used for feedlot animals that have no target of their own and none on their batch. A batch or an animal can still have its own.</p>
+      {err && <div className="mb-3"><ErrorState message={err} /></div>}
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="w-40"><Input label="Target weight (kg)" type="number" inputMode="decimal" min="1" step="0.5" value={kgVal} onChange={(e) => setKgText(e.target.value)} /></div>
+        <div className="w-40"><Input label="Target days on farm" type="number" inputMode="numeric" min="1" step="1" placeholder="none" value={daysVal} onChange={(e) => setDaysText(e.target.value)} /></div>
+        <Button disabled={save.isPending || bad || (kgText === null && daysText === null)} onClick={() => save.mutate()}>Save defaults</Button>
+      </div>
+      <p className="mt-2 text-xs text-muted">Leave the days empty if you do not want a default schedule.</p>
     </Card>
   );
 }

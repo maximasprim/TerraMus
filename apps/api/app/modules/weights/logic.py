@@ -13,6 +13,11 @@ Readiness, from the latest weight and the recent daily gain:
     stalled       not gaining (zero or negative gain)
     needs_weights fewer than two weights, so no trend yet
     no_target     neither the animal nor its batch has a target weight
+Schedule (only when a target number of days on the farm is set), from the day the animal arrived:
+    achieved      already at its target weight
+    on_schedule   the recent daily gain reaches the target weight within the target days
+    behind        at the current gain it will reach the target weight after the target days
+    overdue       the target days are used up and it is not at the target weight yet
 An animal that is ready or nearly ready but is not healthy (or is in quarantine) carries a `hold_reason`: it is
 still shown, but no alert is sent until it is healthy again.
 """
@@ -83,7 +88,8 @@ def intervals(points: list[tuple[date, float]]) -> list[dict[str, Any]]:
 
 
 def assess(points: list[tuple[date, float]], target: float | None, start_kg: float | None, today: date,
-           healthy: bool = True, hold_note: str | None = None, nearly_days: int = NEARLY_READY_DAYS) -> dict[str, Any]:
+           healthy: bool = True, hold_note: str | None = None, nearly_days: int = NEARLY_READY_DAYS,
+           start_date: date | None = None, target_days: int | None = None) -> dict[str, Any]:
     """Everything the Weights page shows about one animal's progress. `points` are daily_points()."""
     current = points[-1][1] if points else None
     last_date = points[-1][0] if points else None
@@ -103,7 +109,17 @@ def assess(points: list[tuple[date, float]], target: float | None, start_kg: flo
         "target_kg": round(target, 2) if target else None,
         "remaining_kg": None, "progress_pct": None, "est_ready_date": None, "days_to_ready": None,
         "stage": "no_target", "hold_reason": None, "flags": [],
+        "start_date": None, "days_on_farm": None, "target_days": None, "days_left": None, "deadline": None,
+        "plan_adg": None, "required_adg": None, "schedule": None, "days_late": None,
     }
+    begin = start_date or (points[0][0] if points else None)
+    if begin:
+        out["start_date"] = begin.isoformat()
+        out["days_on_farm"] = max(0, (today - begin).days)
+    if begin and target_days:
+        out["target_days"] = int(target_days)
+        out["days_left"] = int(target_days) - out["days_on_farm"]
+        out["deadline"] = (begin + timedelta(days=int(target_days))).isoformat()
     if last_date and (today - last_date).days > STALE_WEIGH_DAYS:
         out["flags"].append("stale_weight")
     if not target:
@@ -130,6 +146,23 @@ def assess(points: list[tuple[date, float]], target: float | None, start_kg: flo
         out["days_to_ready"] = max(0, (est - today).days)
         stage = "nearly_ready" if out["days_to_ready"] <= nearly_days else "growing"
     out["stage"] = stage
+    if out["target_days"]:
+        td = out["target_days"]
+        if start is not None and target > start:
+            out["plan_adg"] = round((target - start) / td, 3)
+        left = out["days_left"]
+        if stage == "ready":
+            out["schedule"] = "achieved"
+        elif left is not None and left <= 0:
+            out["schedule"] = "overdue"
+        else:
+            out["required_adg"] = round((target - current) / left, 3) if left else None
+            if out["est_ready_date"]:
+                late = (date.fromisoformat(out["est_ready_date"]) - date.fromisoformat(out["deadline"])).days
+                out["days_late"] = max(0, late)
+                out["schedule"] = "behind" if late > 0 else "on_schedule"
+            elif stage == "stalled":
+                out["schedule"] = "behind"
     if stage in ("ready", "nearly_ready") and not healthy:
         out["hold_reason"] = hold_note or "Not healthy"
     return out
@@ -144,6 +177,10 @@ def summarise(rows: list[dict[str, Any]]) -> dict[str, Any]:
         if r["adg_band"]:
             bands[r["adg_band"]] = bands.get(r["adg_band"], 0) + 1
     adgs = [r["adg"] for r in rows if r["adg"] is not None]
-    return {"head": len(rows), "stages": stages, "bands": bands,
+    schedule: dict[str, int] = {}
+    for r in rows:
+        if r.get("schedule"):
+            schedule[r["schedule"]] = schedule.get(r["schedule"], 0) + 1
+    return {"head": len(rows), "stages": stages, "bands": bands, "schedule": schedule,
             "avg_adg": round(sum(adgs) / len(adgs), 3) if adgs else None,
             "ready_on_hold": sum(1 for r in rows if r["hold_reason"])}

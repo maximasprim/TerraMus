@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime, timezone
 
-from sqlalchemy import String, Numeric, Date, DateTime, ForeignKey, Text
+from sqlalchemy import String, Numeric, Date, DateTime, ForeignKey, Integer, Text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -51,6 +51,7 @@ class Animal(Base, UUIDPKMixin, TimestampMixin):
 
     current_weight: Mapped[float | None] = mapped_column(Numeric(8, 2), nullable=True)
     target_weight: Mapped[float | None] = mapped_column(Numeric(8, 2), nullable=True)
+    target_days: Mapped[int | None] = mapped_column(Integer, nullable=True)   # planned days on the farm (Weights page)
 
     status: Mapped[str] = mapped_column(String(16), default="active", index=True)
     health_status: Mapped[str] = mapped_column(String(32), default="healthy")

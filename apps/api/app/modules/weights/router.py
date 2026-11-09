@@ -17,6 +17,24 @@ router = APIRouter(prefix="/api/v1/weights", tags=["weights"])
 
 class TargetIn(BaseModel):
     target_weight_kg: Decimal | None = Field(default=None, gt=0, le=2000)   # null clears it
+    target_days: int | None = Field(default=None, gt=0, le=3650)            # only changed when sent; null clears it
+
+
+class DefaultsIn(BaseModel):
+    target_weight_kg: Decimal = Field(gt=0, le=2000)
+    target_days: int | None = Field(default=None, gt=0, le=3650)    # null = no default schedule
+
+
+@router.put("/defaults")
+async def set_defaults(req: DefaultsIn, user: User = Depends(require_permission("weights.targets")),
+                       db: AsyncSession = Depends(get_db)):
+    """The farm-wide default target weight and days, used for feedlot animals with no target of their own or on their batch."""
+    return await service.set_defaults(db, user.organization_id, float(req.target_weight_kg), req.target_days)
+
+
+def _days(req: TargetIn) -> dict:
+    """Only touch target_days when the caller sent it, so older callers that send just the weight are unaffected."""
+    return {"days": req.target_days} if "target_days" in req.model_fields_set else {}
 
 
 @router.get("/overview")
@@ -44,11 +62,13 @@ async def animal_detail(animal_id: uuid.UUID, user: User = Depends(require_permi
 async def set_batch_target(batch_id: uuid.UUID, req: TargetIn, user: User = Depends(require_permission("weights.targets")),
                            db: AsyncSession = Depends(get_db)):
     return await service.set_batch_target(db, user.organization_id, batch_id,
-                                          float(req.target_weight_kg) if req.target_weight_kg else None)
+                                          float(req.target_weight_kg) if req.target_weight_kg else None,
+                                          **_days(req))
 
 
 @router.put("/animals/{animal_id}/target")
 async def set_animal_target(animal_id: uuid.UUID, req: TargetIn, user: User = Depends(require_permission("weights.targets")),
                             db: AsyncSession = Depends(get_db)):
     return await service.set_animal_target(db, user.organization_id, animal_id,
-                                           float(req.target_weight_kg) if req.target_weight_kg else None)
+                                           float(req.target_weight_kg) if req.target_weight_kg else None,
+                                           **_days(req))

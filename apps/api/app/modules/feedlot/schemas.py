@@ -20,6 +20,7 @@ class IntakeBatchBase(BaseModel):
     notes: str | None = None
     production_cycle_id: uuid.UUID | None = None
     target_weight_kg: Decimal | None = Field(default=None, gt=0, le=2000)
+    target_days: int | None = Field(default=None, gt=0, le=3650)
 
 
 class IntakeBatchCreate(IntakeBatchBase):
@@ -40,6 +41,7 @@ class IntakeBatchUpdate(BaseModel):
     notes: str | None = None
     production_cycle_id: uuid.UUID | None = None
     target_weight_kg: Decimal | None = Field(default=None, gt=0, le=2000)
+    target_days: int | None = Field(default=None, gt=0, le=3650)
 
 
 class IntakeBatchOut(BaseModel):
@@ -61,6 +63,7 @@ class IntakeBatchOut(BaseModel):
     landed_cost_per_head: float
     production_cycle_id: uuid.UUID | None = None
     target_weight_kg: Decimal | None = None
+    target_days: int | None = None
     head_registered: int = 0
     head_active: int = 0
 

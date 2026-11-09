@@ -8,7 +8,7 @@ import { apiFetch, ApiError } from "@/lib/api";
 import { useCan } from "@/lib/use-auth";
 import { AdgBarsChart, WeightProgressChart } from "@/components/weights/weight-charts";
 import {
-  adgText, BAND_CHIP, BAND_LABEL, fullDate, kg, shortDate, STAGE_CHIP, STAGE_LABEL, type AnimalWeights,
+  adgText, BAND_CHIP, BAND_LABEL, fullDate, kg, SCHEDULE_CHIP, SCHEDULE_LABEL, shortDate, STAGE_CHIP, STAGE_LABEL, type AnimalWeights,
 } from "@/lib/weights-types";
 
 /** One animal's performance: stage, gain vs target, projection, charts, and a table of every weighing.
@@ -18,10 +18,11 @@ export function AnimalPerformance({ animalId, showLink = false, showTable = true
   const qc = useQueryClient();
   const q = useQuery<AnimalWeights>({ queryKey: ["weights", "animal", animalId], queryFn: () => apiFetch<AnimalWeights>(`/api/v1/weights/animals/${animalId}`) });
   const [target, setTarget] = useState<string | null>(null);
+  const [days, setDays] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const save = useMutation({
-    mutationFn: (value: number | null) => apiFetch(`/api/v1/weights/animals/${animalId}/target`, { method: "PUT", body: JSON.stringify({ target_weight_kg: value }) }),
-    onSuccess: () => { setTarget(null); setErr(null); void qc.invalidateQueries({ queryKey: ["weights"] }); },
+    mutationFn: (v: { weight: number | null; days: number | null }) => apiFetch(`/api/v1/weights/animals/${animalId}/target`, { method: "PUT", body: JSON.stringify({ target_weight_kg: v.weight, target_days: v.days }) }),
+    onSuccess: () => { setTarget(null); setDays(null); setErr(null); void qc.invalidateQueries({ queryKey: ["weights"] }); },
     onError: (e) => setErr(e instanceof ApiError ? e.message : "Could not save the target"),
   });
 
@@ -33,6 +34,7 @@ export function AnimalPerformance({ animalId, showLink = false, showTable = true
     <div className="space-y-5">
       <div className="flex flex-wrap items-center gap-2">
         <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${STAGE_CHIP[a.stage]}`}>{STAGE_LABEL[a.stage]}</span>
+        {a.schedule && <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${SCHEDULE_CHIP[a.schedule]}`}>{SCHEDULE_LABEL[a.schedule]}{a.schedule === "behind" && a.days_late ? ` by ~${a.days_late} days` : ""}</span>}
         {a.hold_reason && <span className="rounded-full bg-clay/15 px-2.5 py-0.5 text-xs text-clay">On hold: {a.hold_reason}</span>}
         {a.adg_band && <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${BAND_CHIP[a.adg_band]}`}>{BAND_LABEL[a.adg_band]} growth</span>}
         {a.flags.includes("stale_weight") && <span className="rounded-full bg-brass/25 px-2.5 py-0.5 text-xs text-ink">Not weighed for {a.days_since_weighed} days</span>}
@@ -41,10 +43,12 @@ export function AnimalPerformance({ animalId, showLink = false, showTable = true
 
       <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
         <Fact label="Latest weight" value={kg(a.current_kg)} hint={a.last_weighed ? `on ${fullDate(a.last_weighed)}` : undefined} />
-        <Fact label="Target" value={kg(a.target_kg)} hint={a.target_source === "batch" ? "from its batch" : a.target_source === "animal" ? "set for this animal" : "none set"} />
+        <Fact label="Target" value={kg(a.target_kg)} hint={a.target_source === "batch" ? "from its batch" : a.target_source === "animal" ? "set for this animal" : a.target_source === "default" ? "default target" : "none set"} />
         <Fact label="Still to gain" value={kg(a.remaining_kg)} hint={a.progress_pct != null ? `${a.progress_pct.toFixed(0)}% of the way` : undefined} />
         <Fact label="Daily gain" value={adgText(a.adg)} hint={a.overall_adg != null && a.recent_adg != null ? `overall ${a.overall_adg.toFixed(2)}` : undefined} />
         <Fact label="Gain so far" value={kg(a.gain_kg)} hint={a.start_kg != null ? `from ${kg(a.start_kg)}` : undefined} />
+        {a.target_days ? <Fact label="Days on farm" value={`${a.days_on_farm ?? 0} of ${a.target_days}`} hint={a.days_left != null ? (a.days_left > 0 ? `${a.days_left} days left` : "target days used up") : undefined} /> : null}
+        {a.target_days && a.required_adg != null ? <Fact label="Needs to gain" value={adgText(a.required_adg)} hint={a.plan_adg != null ? `plan ${a.plan_adg.toFixed(2)} kg/day` : undefined} /> : null}
         <Fact label="Expected ready" value={a.stage === "ready" ? "Now" : a.est_ready_date ? shortDate(a.est_ready_date) : "-"}
           hint={a.days_to_ready != null && a.stage !== "ready" ? (a.days_to_ready === 0 ? "any day now" : `in about ${a.days_to_ready} days`) : undefined} />
       </dl>
@@ -66,16 +70,23 @@ export function AnimalPerformance({ animalId, showLink = false, showTable = true
 
       {can("weights.targets") && (
         <div className="rounded-md border border-hairline bg-white/60 p-3">
-          <p className="mb-2 text-sm font-medium text-ink">Target weight for this animal</p>
+          <p className="mb-2 text-sm font-medium text-ink">Targets for this animal</p>
           <div className="flex flex-wrap items-end gap-2">
             <div className="w-36">
               <Input id={`tw-${animalId}`} type="number" inputMode="decimal" min="1" step="0.5" placeholder="e.g. 450" value={target ?? (a.target_source === "animal" ? String(a.target_kg ?? "") : "")}
                 onChange={(e) => setTarget(e.target.value)} aria-label="Target weight in kg" />
             </div>
-            <Button disabled={save.isPending || target === null || target === ""} onClick={() => save.mutate(Number(target))}>Save</Button>
-            {a.target_source === "animal" && <Button variant="ghost" disabled={save.isPending} onClick={() => save.mutate(null)}>Use batch target</Button>}
+            <div className="w-36">
+              <Input id={`td-${animalId}`} type="number" inputMode="numeric" min="1" step="1" placeholder="days on farm" value={days ?? (a.target_days_source === "animal" ? String(a.target_days ?? "") : "")}
+                onChange={(e) => setDays(e.target.value)} aria-label="Target days on the farm" />
+            </div>
+            <Button disabled={save.isPending || (target === null && days === null)}
+              onClick={() => save.mutate({
+                weight: target !== null ? (target === "" ? null : Number(target)) : (a.target_source === "animal" ? a.target_kg : null),
+                days: days !== null ? (days === "" ? null : Number(days)) : (a.target_days_source === "animal" ? a.target_days : null) })}>Save</Button>
+            {(a.target_source === "animal" || a.target_days_source === "animal") && <Button variant="ghost" disabled={save.isPending} onClick={() => save.mutate({ weight: null, days: null })}>Use batch targets</Button>}
           </div>
-          <p className="mt-1 text-xs text-muted">This overrides the batch target for this animal only.</p>
+          <p className="mt-1 text-xs text-muted">These override the batch targets for this animal only. Leave a box empty to use the batch (or the default) for it.</p>
           {err && <p className="mt-1 text-xs text-clay">{err}</p>}
         </div>
       )}

@@ -408,7 +408,7 @@ function OverheadEditor({ doc, busy, onSave }: EP) {
 // --------------------------------------------------------------- thresholds
 const SETTING_GROUPS: { title: string; help: string; fields: { key: string; label: string; def: number; hint: string }[] }[] = [
   { title: "When is an animal ready to sell?", help: "", fields: [
-    { key: "market_ready_kg", label: "Fallback market-ready weight (kg)", def: 300, hint: "Only used for animals with no target weight. Animals follow their own target, or their batch target (set on the batch or on the Weights page), exactly as in the Weights report." }] },
+    { key: "market_ready_kg", label: "Default target weight (kg)", def: 400, hint: "Used for feedlot animals with no target weight of their own or on their batch. Animals follow their own target, or their batch target (set on the batch or on the Weights page), exactly as in the Weights report." }] },
   { title: "How good is the growth rate (ADG)?", help: "ADG is average daily gain: kg gained per day. Growth bands follow the Weights report: above 1.25 excellent, 0.9 to 1.25 on target, 0.6 to 0.9 approaching target, below 0.6 below target.", fields: [
     { key: "interval_gain_good", label: "Good gain between weigh-ins: over (kg)", def: 20, hint: "A gain bigger than this since the previous weighing is highlighted cyan." }] },
   { title: "Money and data checks", help: "", fields: [
@@ -433,7 +433,7 @@ function SettingsEditor({ doc, busy, onSave }: EP) {
               </div>))}
           </div>
         </Section>))}
-      <SaveBar busy={busy} missing={[]} label="Save thresholds" onClick={() => onSave("default", Object.fromEntries(SETTING_FIELDS.filter((f) => v[f.key] !== "").map((f) => [f.key, num(v[f.key])])))} />
+      <SaveBar busy={busy} missing={[]} label="Save thresholds" onClick={() => onSave("default", { ...Object.fromEntries(Object.entries(d).filter(([k]) => !SETTING_FIELDS.some((f) => f.key === k))), ...Object.fromEntries(SETTING_FIELDS.filter((f) => v[f.key] !== "").map((f) => [f.key, num(v[f.key])])) })} />
     </div>
   );
 }

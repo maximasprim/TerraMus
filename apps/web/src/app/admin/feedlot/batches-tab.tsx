@@ -22,7 +22,7 @@ export function BatchesTab() {
   const [reg, setReg] = useState<RegisterResult | null>(null);
   const [rows, setRows] = useState<TagRow[]>(() => blankTagRows());
   const [attempted, setAttempted] = useState(false);
-  const [ib, setIb] = useState({ delivered_on: todayIso(), farm_id: "", source: "", sex_class: "bull", head_purchased: "", purchase_cost: "", transport_cost: "", other_fees: "", handlers_cost: "", target: "", cycle: "" });
+  const [ib, setIb] = useState({ delivered_on: todayIso(), farm_id: "", source: "", sex_class: "bull", head_purchased: "", purchase_cost: "", transport_cost: "", other_fees: "", handlers_cost: "", target: "", days: "", cycle: "" });
   const [sb, setSb] = useState({ sold_on: todayIso(), price_per_kg: "", buyer_name: "" });
 
   const farms = useQuery<FarmOption[]>({ queryKey: ["farms"], queryFn: () => apiFetch<FarmOption[]>("/api/v1/farms") });
@@ -37,6 +37,7 @@ export function BatchesTab() {
       head_purchased: Number(ib.head_purchased) || 0, purchase_cost: money(ib.purchase_cost), transport_cost: money(ib.transport_cost),
       other_fees: money(ib.other_fees), handlers_cost: money(ib.handlers_cost),
       target_weight_kg: ib.target ? ib.target : undefined,
+      target_days: ib.days ? Number(ib.days) : undefined,
       production_cycle_id: ib.cycle || null }) }),     // explicit (null = deliberately no cycle), so the header filter never overrides this choice
     onSuccess: () => { refresh(); setIntakeOpen(false); setError(null); },
     onError: (e) => setError(errMsg(e, "Could not create the batch")),
@@ -120,7 +121,8 @@ export function BatchesTab() {
             <Input label="Other fees (KES)" type="number" min="0" value={ib.other_fees} onChange={(e) => setIb({ ...ib, other_fees: e.target.value })} />
             <Input label="Handlers (KES)" type="number" min="0" value={ib.handlers_cost} onChange={(e) => setIb({ ...ib, handlers_cost: e.target.value })} />
           </div>
-          <Input label="Target weight (kg, optional)" type="number" min="1" step="0.5" placeholder="e.g. 450" value={ib.target} onChange={(e) => setIb({ ...ib, target: e.target.value })} />
+          <Input label="Target weight (kg, optional; blank = 400)" type="number" min="1" step="0.5" placeholder="e.g. 450" value={ib.target} onChange={(e) => setIb({ ...ib, target: e.target.value })} />
+          <Input label="Target days on the farm (optional)" type="number" min="1" step="1" placeholder="e.g. 240" value={ib.days} onChange={(e) => setIb({ ...ib, days: e.target.value })} />
           <p className="-mt-2 text-xs text-muted">The weight at which animals in this batch are ready for market. The Weights page uses it to show readiness; you can change it there at any time.</p>
           {perHead != null && <p className="text-sm text-muted">Landed cost per head: <b className="text-forest">KES {kes(perHead)}</b>. Every animal added carries this as its buying price.</p>}
           <Button disabled={!ib.farm_id || !(Number(ib.head_purchased) > 0) || makeIntake.isPending} onClick={() => makeIntake.mutate()}>Create batch</Button>

@@ -25,10 +25,11 @@ export function WeightProgressChart({ data, height = 260 }: { data: AnimalWeight
   if (pts.length === 0) return <p className="py-8 text-center text-sm text-muted">No weights recorded yet.</p>;
 
   const proj = data.projection;
-  const xs = [...pts.map((p) => t(p.date)), ...(proj ? proj.map((p) => t(p.date)) : [])];
+  const plan = data.plan && data.plan.length === 2 ? data.plan : null;
+  const xs = [...pts.map((p) => t(p.date)), ...(proj ? proj.map((p) => t(p.date)) : []), ...(plan ? plan.map((p) => t(p.date)) : [])];
   let x0 = Math.min(...xs), x1 = Math.max(...xs);
   if (x1 === x0) x1 = x0 + 7 * DAY;
-  const vals = [...pts.map((p) => p.weight_kg), ...data.batch_avg.map((b) => b.avg_kg), ...(target ? [target] : [])];
+  const vals = [...pts.map((p) => p.weight_kg), ...data.batch_avg.map((b) => b.avg_kg), ...(target ? [target] : []), ...(plan ? plan.map((p) => p.weight_kg) : [])];
   const lo = Math.min(...vals), hi = Math.max(...vals);
   const pad = Math.max(3, (hi - lo) * 0.1);
   const ticks = niceTicks(Math.max(0, lo - pad), hi + pad, 4);
@@ -60,6 +61,12 @@ export function WeightProgressChart({ data, height = 260 }: { data: AnimalWeight
             <text x={w - RIGHT} y={py(target) - 5} textAnchor="end" fontSize={11} fill="#8a6a1f">Target {target} kg</text>
           </g>
         ) : null}
+        {plan && (
+          <g>
+            <path d={line(plan.map((p) => ({ x: t(p.date), y: p.weight_kg })))} fill="none" stroke="#7B6BA8" strokeWidth={1.5} strokeDasharray="8 3 2 3" />
+            <text x={px(t(plan[1].date))} y={py(plan[1].weight_kg) + 14} textAnchor="end" fontSize={11} fill="#5d4f8a">Target day {shortDate(plan[1].date)}</text>
+          </g>
+        )}
         {hasBatch && (
           <path d={line(data.batch_avg.map((b) => ({ x: t(b.date), y: b.avg_kg })))} fill="none" stroke="#6F9A7B" strokeWidth={1.5} strokeDasharray="2 4" />
         )}
@@ -76,6 +83,7 @@ export function WeightProgressChart({ data, height = 260 }: { data: AnimalWeight
       <ul className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
         <li><span className="mr-1 inline-block h-0.5 w-4 bg-forest-light align-middle" style={{ backgroundColor: "#2C4F3E" }} />Weight</li>
         {target ? <li><span className="mr-1 inline-block w-4 border-t-2 border-dashed align-middle" style={{ borderColor: "#B8862B" }} />Target</li> : null}
+        {plan ? <li><span className="mr-1 inline-block w-4 border-t-2 border-dashed align-middle" style={{ borderColor: "#7B6BA8" }} />Plan to reach the target on the target day</li> : null}
         {proj ? <li><span className="mr-1 inline-block w-4 border-t-2 border-dashed align-middle" style={{ borderColor: "#B8862B" }} />Projected</li> : null}
         {hasBatch && <li><span className="mr-1 inline-block w-4 border-t-2 border-dotted align-middle" style={{ borderColor: "#6F9A7B" }} />Batch average (others)</li>}
       </ul>

@@ -22,7 +22,8 @@ from typing import Any, Iterable
 from app.modules.weights import logic as wlogic
 
 DEFAULT_SETTINGS: dict[str, Any] = {
-    "market_ready_kg": 300,       # FALLBACK only: used for animals with no target weight (animal or batch)
+    "market_ready_kg": 400,       # DEFAULT target weight: used for animals with no target of their own or on their batch
+    "default_target_days": None,  # DEFAULT days on the farm for feedlot animals with none of their own (None = no schedule)
     "adg_poor_max": None,         # no separate "poor" band any more: bands follow the Weights report
     "adg_approaching_min": 0.6,   # ADG 0.6 - 0.9 -> approaching target (pinned to weights.logic, see get_settings)
     "adg_target_min": 0.9,        # ADG 0.9 - 1.25 -> on target        (pinned to weights.logic)

@@ -87,12 +87,8 @@ async def run_scheduled_checks(db: AsyncSession, org_id: uuid.UUID, today: date 
             out.feedlot_unweighed_notified = await _alert(
                 db, org_id, today, "feedlot:unweighed", WEEKLY, "feedlot.read", "system", "Animals overdue for weighing",
                 f"{len(stale)} animal(s) have not been weighed in over 45 days: {_list(stale)}.")
-        ready = [a["tag"] for a in perf["animals"] if a["status"] == "active" and a["market_ready"]
-                 and a["target_source"] == "default" and not a.get("ready_hold")]   # target-bearing animals are alerted by Weights
-        if ready:
-            out.feedlot_market_ready_notified = await _alert(
-                db, org_id, today, "feedlot:market_ready", WEEKLY, "feedlot.read", "system", "Animals ready for market",
-                f"{len(ready)} animal(s) are at or above market weight: {_list(ready)}.")
+        # "Ready for market" alerts now come from the Weights block below (one alert per animal, same target rules),
+        # so Feedlot no longer sends its own weekly one: it would repeat the same animals.
 
     # --- receivables: debts older than 30 days
     from app.modules.receivables import service as receivables

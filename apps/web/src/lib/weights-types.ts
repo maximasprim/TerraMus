@@ -1,12 +1,16 @@
 // Shapes returned by /api/v1/weights/* (apps/api/app/modules/weights) and the words/colours used to show them.
 
 export type Stage = "ready" | "nearly_ready" | "growing" | "stalled" | "needs_weights" | "no_target";
+export type Schedule = "achieved" | "on_schedule" | "behind" | "overdue";
 export type Band = "excellent" | "on_target" | "approaching_target" | "below_target";
 
 export interface WeightRow {
   id: string; tag: string; name: string | null; species: string; breed: string | null; sex: string;
   status: string; health_status: string; batch_id: string | null; batch: string | null;
-  target_kg: number | null; target_source: "animal" | "batch" | null;
+  target_kg: number | null; target_source: "animal" | "batch" | "default" | null;
+  start_date: string | null; days_on_farm: number | null; target_days: number | null; target_days_source: "animal" | "batch" | "default" | null;
+  days_left: number | null; deadline: string | null; plan_adg: number | null; required_adg: number | null;
+  schedule: Schedule | null; days_late: number | null;
   start_kg: number | null; current_kg: number | null; last_weighed: string | null; days_since_weighed: number | null;
   gain_kg: number | null; overall_adg: number | null; recent_adg: number | null; adg: number | null; adg_band: Band | null;
   remaining_kg: number | null; progress_pct: number | null; est_ready_date: string | null; days_to_ready: number | null;
@@ -16,16 +20,18 @@ export interface WeightRow {
 export interface BatchSummary {
   batch_id: string | null; batch: string; head: number; with_target: number; avg_target_kg: number | null;
   avg_current_kg: number | null; avg_adg: number | null; adg_band: Band | null; avg_progress_pct: number | null;
-  ready: number; nearly_ready: number;
+  ready: number; nearly_ready: number; target_days: number | null; behind: number;
 }
 
 export interface WeightsOverview {
   as_of: string;
   thresholds: { excellent_above: number; on_target_from: number; approaching_from: number; nearly_ready_days: number; recent_window_days: number };
-  summary: { head: number; stages: Partial<Record<Stage, number>>; bands: Partial<Record<Band, number>>; avg_adg: number | null; ready_on_hold: number };
+  summary: { head: number; stages: Partial<Record<Stage, number>>; bands: Partial<Record<Band, number>>; avg_adg: number | null; ready_on_hold: number; schedule?: Partial<Record<Schedule, number>> };
   animals: WeightRow[];
   batches: BatchSummary[];
-  batch_options: { id: string; label: string | null; target_weight_kg: number | null }[];
+  batch_options: { id: string; label: string | null; target_weight_kg: number | null; target_days: number | null }[];
+  default_target_kg: number;
+  default_target_days: number | null;
 }
 
 export interface DailyRow {
@@ -41,6 +47,7 @@ export interface AnimalWeights {
   series: SeriesPoint[];
   batch_avg: { date: string; avg_kg: number; n: number }[];
   projection: { date: string; weight_kg: number }[] | null;
+  plan?: { date: string; weight_kg: number }[] | null;
   thresholds: WeightsOverview["thresholds"];
 }
 
@@ -52,6 +59,10 @@ export const STAGE_LABEL: Record<Stage, string> = {
 export const STAGE_CHIP: Record<Stage, string> = {
   ready: "bg-forest text-paper", nearly_ready: "bg-brass/25 text-ink", growing: "bg-sage/20 text-forest",
   stalled: "bg-clay/15 text-clay", needs_weights: "bg-hairline text-muted", no_target: "bg-hairline text-muted",
+};
+export const SCHEDULE_LABEL: Record<Schedule, string> = { achieved: "Target reached", on_schedule: "On schedule", behind: "Behind schedule", overdue: "Over the target days" };
+export const SCHEDULE_CHIP: Record<Schedule, string> = {
+  achieved: "bg-forest/15 text-forest", on_schedule: "bg-sage/20 text-forest", behind: "bg-brass/25 text-ink", overdue: "bg-clay/15 text-clay",
 };
 export const BAND_LABEL: Record<Band, string> = { excellent: "Excellent", on_target: "On target", approaching_target: "Approaching target", below_target: "Below target" };
 export const BAND_CHIP: Record<Band, string> = {

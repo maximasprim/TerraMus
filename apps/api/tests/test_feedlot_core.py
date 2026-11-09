@@ -86,8 +86,8 @@ async def test_performance_uses_worksheet_conventions(client):
     p = (await client.get("/api/v1/feedlot/performance?as_of=2026-07-28", headers=h)).json()
     a01 = next(a for a in p["animals"] if a["tag"] == "A01")
     assert a01["days_on_farm"] == 228 and a01["overall_gain"] == 139.0
-    assert a01["adg"] == pytest.approx(139 / 228, abs=1e-4) and a01["market_ready"] is True
-    assert p["summary"]["market_ready"] == 1 and p["summary"]["head"] == 3
+    assert a01["adg"] == pytest.approx(139 / 228, abs=1e-4) and a01["market_ready"] is False   # 349 kg < the 400 kg default target
+    assert p["summary"]["market_ready"] == 0 and p["summary"]["head"] == 3
     assert set(p["summary"]["no_recent_weight"]) == {"A02", "A03"}
 
 

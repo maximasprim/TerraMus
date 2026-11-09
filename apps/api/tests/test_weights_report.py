@@ -234,3 +234,59 @@ async def test_weights_report_follows_the_production_cycle_filter(client, engine
     assert [o["id"] for o in ov["batch_options"]] == [b2["id"]]
     d = (await client.get(f"/api/v1/weights/daily?production_cycle_id={c1}", headers=h)).json()
     assert [r["tag"] for r in d["rows"]] == ["H-001"] and d["days"][0]["head"] == 1
+
+
+async def test_default_target_400_and_target_days_schedule(client, engine):
+    h = await _owner(client, "Weights Farm I", "weightsi@example.com")
+    farm = await _farm(client, h)
+    batch = await _batch(client, h, farm, name="BATCH 12", target_days=150)
+    assert batch["target_days"] == 150
+    a1, a2 = await _animal(client, h, farm, "I-001"), await _animal(client, h, farm, "I-002")
+    loose = await _animal(client, h, farm, "I-003")                      # not in a feedlot batch
+    for a in (a1, a2):
+        await _link(client, h, batch["id"], a, 200)
+    for a, kg in ((a1, 380), (a2, 410), (loose, 410)):
+        await _weigh(client, h, a, TODAY - timedelta(days=10), 300 if a != a2 else 380)
+        await _weigh(client, h, a, TODAY, kg)
+    ov = (await client.get("/api/v1/weights/overview", headers=h)).json()
+    rows = {r["tag"]: r for r in ov["animals"]}
+    assert ov["default_target_kg"] == 400
+    assert rows["I-001"]["target_kg"] == 400 and rows["I-001"]["target_source"] == "default" and rows["I-001"]["stage"] != "ready"
+    assert rows["I-002"]["stage"] == "ready" and rows["I-002"]["schedule"] == "achieved"
+    assert rows["I-003"]["stage"] == "no_target"                         # the default only applies to feedlot animals
+    assert rows["I-001"]["target_days"] == 150 and rows["I-001"]["target_days_source"] == "batch"
+    assert rows["I-001"]["schedule"] in ("on_schedule", "behind", "overdue")
+    # an animal's own number of days overrides the batch; sending only the weight leaves the days alone
+    r = await client.put(f"/api/v1/weights/animals/{a1}/target", headers=h, json={"target_weight_kg": 420, "target_days": 90})
+    assert r.status_code == 200 and r.json()["target_days"] == 90
+    await client.put(f"/api/v1/weights/animals/{a1}/target", headers=h, json={"target_weight_kg": 430})
+    one = (await client.get(f"/api/v1/weights/animals/{a1}", headers=h)).json()
+    assert one["animal"]["target_days"] == 90 and one["animal"]["target_days_source"] == "animal"
+    assert one["plan"][1]["weight_kg"] == 430 and one["plan"][0]["weight_kg"] == 200
+    # batch days can be changed and cleared
+    r = await client.put(f"/api/v1/weights/batches/{batch['id']}/target", headers=h, json={"target_weight_kg": None, "target_days": None})
+    assert r.json()["target_days"] is None
+
+
+async def test_default_target_weight_and_days_can_be_set_without_code_changes(client, engine):
+    h = await _owner(client, "Weights Farm J", "weightsj@example.com")
+    farm = await _farm(client, h)
+    batch = await _batch(client, h, farm, name="BATCH 13")
+    a = await _animal(client, h, farm, "J-001")
+    await _link(client, h, batch["id"], a, 200)
+    await _weigh(client, h, a, TODAY - timedelta(days=10), 280)
+    await _weigh(client, h, a, TODAY, 300)
+    ov = (await client.get("/api/v1/weights/overview", headers=h)).json()
+    assert ov["default_target_kg"] == 400 and ov["default_target_days"] is None
+    assert ov["animals"][0]["schedule"] is None
+    r = await client.put("/api/v1/weights/defaults", headers=h, json={"target_weight_kg": 300, "target_days": 200})
+    assert r.status_code == 200
+    ov = (await client.get("/api/v1/weights/overview", headers=h)).json()
+    row = ov["animals"][0]
+    assert ov["default_target_kg"] == 300 and ov["default_target_days"] == 200
+    assert row["stage"] == "ready" and row["target_days"] == 200 and row["target_days_source"] == "default"
+    perf = (await client.get("/api/v1/feedlot/performance", headers=h)).json()          # Feedlot reads the same default
+    assert perf["animals"][0]["target_weight"] == 300 and perf["animals"][0]["market_ready"] is True
+    await client.put("/api/v1/weights/defaults", headers=h, json={"target_weight_kg": 350})
+    ov = (await client.get("/api/v1/weights/overview", headers=h)).json()
+    assert ov["default_target_kg"] == 350 and ov["default_target_days"] is None

@@ -9,7 +9,9 @@ const mk = (tag: string, o: Partial<WeightRow> = {}): WeightRow => ({
   id: tag, tag, name: null, species: "cattle", breed: null, sex: "male", status: "active", health_status: "healthy",
   batch_id: null, batch: null, target_kg: 450, target_source: "batch", start_kg: 300, current_kg: 400, last_weighed: "2026-11-01",
   days_since_weighed: 7, gain_kg: 100, overall_adg: 1, recent_adg: 1, adg: 1, adg_band: "on_target", remaining_kg: 50,
-  progress_pct: 66, est_ready_date: null, days_to_ready: 50, stage: "growing", hold_reason: null, flags: [], weigh_count: 3, ...o });
+  progress_pct: 66, est_ready_date: null, days_to_ready: 50, stage: "growing", hold_reason: null, flags: [], weigh_count: 3,
+  start_date: null, days_on_farm: null, target_days: null, target_days_source: null, days_left: null, deadline: null,
+  plan_adg: null, required_adg: null, schedule: null, days_late: null, ...o });
 const rows = [
   mk("B10", { batch_id: "b1", batch: "Batch 1 · BATCH 1", stage: "ready", current_kg: 455, adg: 1.5, days_to_ready: 0, progress_pct: 100 }),
   mk("B2", { batch_id: "b1", batch: "Batch 1 · BATCH 1", stage: "nearly_ready", current_kg: 440, adg: 0.9, days_to_ready: 11, progress_pct: 93 }),
