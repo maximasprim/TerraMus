@@ -131,3 +131,22 @@ class CostingDocument(Base, UUIDPKMixin, TimestampMixin):
     kind: Mapped[str] = mapped_column(String(24))
     name: Mapped[str] = mapped_column(String(160))
     data: Mapped[dict] = mapped_column(JSONB, default=dict)
+
+
+class WorksheetSync(Base, UUIDPKMixin, TimestampMixin):
+    """One per organisation: where its Google Sheet lives and how to import it automatically each day.
+    The import itself is the same importer as the manual upload (worksheet_import), which is safe to repeat."""
+    __tablename__ = "worksheet_syncs"
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), unique=True, index=True)
+    sheet_url: Mapped[str] = mapped_column(Text, default="")
+    enabled: Mapped[bool] = mapped_column(default=False)
+    production_cycle_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    post_to_finance: Mapped[bool] = mapped_column(default=True)
+    include_costing: Mapped[bool] = mapped_column(default=True)
+    configured_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_status: Mapped[str | None] = mapped_column(String(16), nullable=True)      # ok | unchanged | failed
+    last_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)         # of the last workbook imported successfully
+    last_report: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

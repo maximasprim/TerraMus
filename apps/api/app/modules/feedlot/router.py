@@ -159,6 +159,7 @@ async def delete_costing(doc_id: uuid.UUID, user: User = Depends(require_permiss
 
 # ---- worksheet import / export (Sahara Oasis "Bulls WG Worksheet" format)
 from fastapi import File, HTTPException, UploadFile  # noqa: E402
+from pydantic import BaseModel  # noqa: E402
 
 MAX_WORKSHEET_BYTES = 15 * 1024 * 1024
 
@@ -183,6 +184,39 @@ async def import_worksheet(
     return await run_import(db, user.organization_id, user.id, content, farm_id=farm_id,
                             dry_run=dry_run, include_costing=include_costing, post_to_finance=post_to_finance,
                             production_cycle_id=production_cycle_id)
+
+
+class WorksheetSyncIn(BaseModel):
+    sheet_url: str = ""
+    enabled: bool = False
+    production_cycle_id: uuid.UUID | None = None
+    post_to_finance: bool = True
+    include_costing: bool = True
+
+
+@router.get("/worksheet/sync")
+async def worksheet_sync_config(user: User = Depends(require_permission("feedlot.manage")), db: AsyncSession = Depends(get_db)):
+    """Where the Google Sheet is, whether it is imported automatically, and how the last run went."""
+    from app.modules.feedlot import worksheet_sync
+    return await worksheet_sync.get_config(db, user.organization_id)
+
+
+@router.put("/worksheet/sync")
+async def worksheet_sync_save(req: WorksheetSyncIn, user: User = Depends(require_permission("feedlot.manage")),
+                              db: AsyncSession = Depends(get_db)):
+    from app.modules.feedlot import worksheet_sync
+    return await worksheet_sync.save_config(db, user.organization_id, user.id, sheet_url=req.sheet_url, enabled=req.enabled,
+                                            production_cycle_id=req.production_cycle_id, post_to_finance=req.post_to_finance,
+                                            include_costing=req.include_costing)
+
+
+@router.post("/worksheet/sync/run")
+async def worksheet_sync_run(dry_run: bool = Query(False, description="Preview what would change; nothing is saved."),
+                             force: bool = Query(False, description="Import even if the sheet looks unchanged."),
+                             user: User = Depends(require_permission("feedlot.manage")), db: AsyncSession = Depends(get_db)):
+    """Import the Google Sheet now (the same thing the daily automatic run does)."""
+    from app.modules.feedlot import worksheet_sync
+    return await worksheet_sync.run_sync(db, user.organization_id, dry_run=dry_run, force=force)
 
 
 @router.post("/ledger-sync")

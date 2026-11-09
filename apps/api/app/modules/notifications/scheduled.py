@@ -90,6 +90,21 @@ async def run_scheduled_checks(db: AsyncSession, org_id: uuid.UUID, today: date 
         # "Ready for market" alerts now come from the Weights block below (one alert per animal, same target rules),
         # so Feedlot no longer sends its own weekly one: it would repeat the same animals.
 
+    # --- Google Sheet worksheet: import it automatically when the farm switched that on. A failure never stops the
+    # other checks; it is reported once a day to people who manage the feedlot until it works again.
+    from app.modules.feedlot import worksheet_sync
+    sync = await worksheet_sync.get_config(db, org_id)
+    if sync["enabled"] and sync["sheet_url"]:
+        try:
+            res = await worksheet_sync.run_sync(db, org_id)
+        except Exception as e:              # noqa: BLE001 - one farm's sheet problem must not block its other alerts
+            await db.rollback()
+            res = {"status": "failed", "message": f"Unexpected error: {type(e).__name__}"}
+        if res["status"] == "failed":
+            out.worksheet_sync_failed = 1
+            await _alert(db, org_id, today, "worksheet_sync:failed", DAILY, "feedlot.manage", "system",
+                         "Google Sheet import failed", f"{res['message']} Open Feedlot > Worksheet to fix it.")
+
     # --- receivables: debts older than 30 days
     from app.modules.receivables import service as receivables
     owing = await receivables.balances(db, org_id, today)

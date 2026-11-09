@@ -33,6 +33,7 @@ class ScheduledChecksResult(BaseModel):
     fodder_notified: int = 0
     weights_ready_notified: int = 0
     weights_nearly_ready_notified: int = 0
+    worksheet_sync_failed: int = 0
 
 
 class EmailOutboxOut(BaseModel):
