@@ -8,7 +8,8 @@ import {
   discard, enqueue, isNetworkError, loadQueue, retry, syncQueue,
   type KV, type QueuedWeighDay, type Sender,
 } from "@/app/admin/feedlot/offline-queue";
-import { analyseRows, blankRows, isBlankRow, parseWeightList, withTrailingBlank, type WeighRow } from "@/lib/weigh-rows";
+import { analyseRows, blankRows, isBlankRow, MAX_WEIGHT_KG, parseWeight, parseWeightList, withTrailingBlank, type WeighRow } from "@/lib/weigh-rows";
+import { useCan, useMe } from "@/lib/use-auth";
 
 // One weigh-day form for the whole app: the Feedlot "Weigh day" tab and the Livestock page's "Record weights".
 // Tag and weight are separate boxes, one row per animal. Offline saving, preview and the result list are unchanged.
@@ -78,9 +79,41 @@ function Panel({ split, className, children }: { split: boolean; className?: str
   return split ? <Card className={className}>{children}</Card> : <div className={className}>{children}</div>;
 }
 
+type QueueState = ReturnType<typeof useWeighQueue>;
+
+/** Offline banner, the "sent" notice and the list of weigh days waiting on this device (shared by both forms). */
+function WeighQueueSection({ q: { queue, online, notice, refreshQueue, sync } }: { q: QueueState }) {
+  const pending = queue.filter((x) => x.status === "pending").length;
+  return (
+    <>
+      {!online && <div className="rounded border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-900">You are offline. Weights you save are kept on this device and sent when the connection returns.</div>}
+      {notice && <div className="rounded border border-forest/30 bg-forest/5 px-4 py-2 text-sm text-forest">{notice}</div>}
+      {queue.length > 0 && (
+        <Card>
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="font-display text-lg text-forest">Waiting to be sent <span className="text-sm font-normal text-muted">({queue.length})</span></h2>
+            <Button variant="ghost" disabled={!online || pending === 0} onClick={() => void sync()}>Send now</Button>
+          </div>
+          {queue.map((q) => (
+            <div key={q.id} className="flex items-center justify-between gap-3 border-t border-hairline/60 py-2 text-sm">
+              <div>
+                <span className="font-medium">{q.weighed_on}</span> · {q.entries.length} animals{q.scale_label ? ` · ${q.scale_label}` : ""}
+                {q.status === "failed" ? <div className="text-xs text-clay">Rejected: {q.error}</div> : <div className="text-xs text-muted">Waiting for a connection</div>}
+              </div>
+              <div className="flex gap-2">
+                {q.status === "failed" && <Button variant="ghost" onClick={() => { const s = getStore(); if (s) { retry(s, q.id); refreshQueue(); void sync(); } }}>Try again</Button>}
+                <Button variant="ghost" onClick={() => { if (window.confirm("Discard these saved weights? They have not been recorded yet.")) { const s = getStore(); if (s) { discard(s, q.id); refreshQueue(); } } }}>Discard</Button>
+              </div>
+            </div>))}
+        </Card>
+      )}
+    </>
+  );
+}
+
 const CELL = "w-full rounded-md border bg-white px-3 py-2.5 text-base focus:border-brass focus:outline-none sm:py-2 sm:text-sm";
 
-export function WeighDayForm({ layout = "split", title = "Record a weigh day" }: { layout?: "split" | "stacked"; title?: string | null }) {
+function MultiWeighForm({ layout = "split", title = "Record a weigh day" }: { layout?: "split" | "stacked"; title?: string | null }) {
   const queryClient = useQueryClient();
   const { queue, online, notice, setNotice, refreshQueue, sync } = useWeighQueue();
   const [date, setDate] = useState(todayIso());
@@ -162,27 +195,7 @@ export function WeighDayForm({ layout = "split", title = "Record a weigh day" }:
 
   return (
     <div className="space-y-6">
-      {!online && <div className="rounded border border-amber-300 bg-amber-50 px-4 py-2 text-sm text-amber-900">You are offline. Weights you save are kept on this device and sent when the connection returns.</div>}
-      {notice && <div className="rounded border border-forest/30 bg-forest/5 px-4 py-2 text-sm text-forest">{notice}</div>}
-      {queue.length > 0 && (
-        <Card>
-          <div className="mb-2 flex items-center justify-between">
-            <h2 className="font-display text-lg text-forest">Waiting to be sent <span className="text-sm font-normal text-muted">({queue.length})</span></h2>
-            <Button variant="ghost" disabled={!online || pending === 0} onClick={() => void sync()}>Send now</Button>
-          </div>
-          {queue.map((q) => (
-            <div key={q.id} className="flex items-center justify-between gap-3 border-t border-hairline/60 py-2 text-sm">
-              <div>
-                <span className="font-medium">{q.weighed_on}</span> · {q.entries.length} animals{q.scale_label ? ` · ${q.scale_label}` : ""}
-                {q.status === "failed" ? <div className="text-xs text-clay">Rejected: {q.error}</div> : <div className="text-xs text-muted">Waiting for a connection</div>}
-              </div>
-              <div className="flex gap-2">
-                {q.status === "failed" && <Button variant="ghost" onClick={() => { const s = getStore(); if (s) { retry(s, q.id); refreshQueue(); void sync(); } }}>Try again</Button>}
-                <Button variant="ghost" onClick={() => { if (window.confirm("Discard these saved weights? They have not been recorded yet.")) { const s = getStore(); if (s) { discard(s, q.id); refreshQueue(); } } }}>Discard</Button>
-              </div>
-            </div>))}
-        </Card>
-      )}
+      <WeighQueueSection q={{ queue, online, notice, setNotice, refreshQueue, sync }} />
       <div className={split ? "grid gap-6 lg:grid-cols-2" : "space-y-4"}>
         <Panel split={split} className="space-y-3">
           {title && <h2 className="font-display text-lg text-forest">{title}</h2>}
@@ -282,6 +295,133 @@ export function WeighDayForm({ layout = "split", title = "Record a weigh day" }:
       </div>
     </div>
   );
+}
+
+/** One animal at a time: for people who weigh slowly (a few minutes per animal). Each weight is saved the moment it is
+ * entered, so nothing is lost between animals. Same endpoint, same offline saving as the full form. */
+function SingleWeighForm({ title = "Record a weight" }: { title?: string | null }) {
+  const queryClient = useQueryClient();
+  const { queue, online, notice, setNotice, refreshQueue, sync } = useWeighQueue();
+  const [date, setDate] = useState(todayIso());
+  const [scale, setScale] = useState("");
+  const [tag, setTag] = useState("");
+  const [weight, setWeight] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState<{ tag: string; kg: number; note?: string; offline?: boolean } | null>(null);
+  const [replace, setReplace] = useState<{ tag: string; kg: number; existing: number } | null>(null);
+  const [recent, setRecent] = useState<{ tag: string; kg: number; offline?: boolean }[]>([]);
+  const tagRef = useRef<HTMLInputElement>(null);
+  const weightRef = useRef<HTMLInputElement>(null);
+
+  const next = (t: string, kgValue: number, note?: string, offline?: boolean) => {
+    setSaved({ tag: t, kg: kgValue, note, offline }); setRecent((r) => [{ tag: t, kg: kgValue, offline }, ...r].slice(0, 6));
+    setTag(""); setWeight(""); setReplace(null); setError(null);
+    tagRef.current?.focus();
+  };
+
+  const submit = async (overwrite = false, forTag?: string, forKg?: number) => {
+    setNotice(null); setSaved(null);
+    const t = (forTag ?? tag).trim();
+    const w = forKg ?? parseWeight(weight);
+    if (!t) { setError("Enter the animal's tag."); tagRef.current?.focus(); return; }
+    if (w === null || w <= 0 || w > MAX_WEIGHT_KG) { setError(`Enter the weight in kg (a number above 0, up to ${MAX_WEIGHT_KG}).`); weightRef.current?.focus(); return; }
+    const entries = [{ animal_number: t, weight_kg: w }];
+    const keepOnDevice = () => {
+      const s = getStore();
+      if (!s) { setError("This browser cannot keep data offline. Reconnect before saving."); return; }
+      enqueue(s, { weighed_on: date, scale_label: scale || undefined, entries });
+      refreshQueue(); next(t, w, "Saved on this device. It will be sent when you are back online.", true);
+    };
+    if (typeof navigator !== "undefined" && !navigator.onLine) { keepOnDevice(); return; }
+    setBusy(true); setError(null);
+    try {
+      const d = await post({ weighed_on: date, scale_label: scale || undefined, entries, dry_run: false, ...(overwrite ? { overwrite: true } : {}) });
+      const r = d.results[0];
+      if (r && (r.status === "recorded" || r.status === "updated")) {
+        refreshAfterRecording(queryClient);
+        next(t, w, r.flags?.length ? "Saved, but this is a big change from the last weight. Please check it is right." : undefined);
+      } else if (r?.status === "already_recorded") {
+        setReplace({ tag: t, kg: w, existing: r.existing_kg ?? 0 });
+      } else if (r?.status === "unknown_animal") {
+        setError(`No animal with the tag ${t}. Check the tag and try again.`); tagRef.current?.focus();
+      } else if (r?.status === "inactive_animal") {
+        setError(`${t} is no longer on the farm (${r.detail ?? "inactive"}), so a weight cannot be added.`);
+      } else if (r?.status === "cycle_closed") {
+        setError(r.detail ?? "This animal's production cycle is closed.");
+      } else {
+        setError("The weight was not saved. Please try again.");
+      }
+    } catch (e) {
+      if (isNetworkError(e)) keepOnDevice(); else setError(errMsg(e, "Could not record the weight"));
+    } finally { setBusy(false); }
+  };
+
+  const big = "w-full rounded-md border border-hairline bg-white px-4 py-3 text-lg focus:border-brass focus:outline-none";
+  return (
+    <div className="space-y-4">
+      <WeighQueueSection q={{ queue, online, notice, setNotice, refreshQueue, sync }} />
+      <div className="space-y-4">
+        {title && <h2 className="font-display text-lg text-forest">{title}</h2>}
+        <div className="grid grid-cols-2 gap-3">
+          <Input label="Weigh date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          <Input label="Scale (optional)" value={scale} onChange={(e) => setScale(e.target.value)} placeholder="e.g. Crush pen scale" />
+        </div>
+        <div>
+          <label htmlFor="single-tag" className="mb-1 block text-sm font-medium text-ink">Animal tag</label>
+          <input id="single-tag" ref={tagRef} value={tag} placeholder="e.g. B0130" autoFocus
+            autoCapitalize="characters" autoCorrect="off" autoComplete="off" spellCheck={false} enterKeyHint="next"
+            onChange={(e) => { setTag(e.target.value); setError(null); setReplace(null); }}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); weightRef.current?.focus(); } }}
+            className={`${big} font-mono`} />
+        </div>
+        <div>
+          <label htmlFor="single-weight" className="mb-1 block text-sm font-medium text-ink">Weight (kg)</label>
+          <input id="single-weight" ref={weightRef} value={weight} placeholder="e.g. 349" inputMode="decimal" autoComplete="off" enterKeyHint="done"
+            onChange={(e) => { setWeight(e.target.value); setError(null); setReplace(null); }}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); if (!busy) void submit(); } }}
+            className={big} />
+        </div>
+        {error && <ErrorState message={error} />}
+        {replace && (
+          <div className="rounded border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <p><b>{replace.tag}</b> was already weighed on this date: <b>{replace.existing} kg</b>. Replace it with <b>{replace.kg} kg</b>?</p>
+            <div className="mt-2 flex gap-2">
+              <Button disabled={busy} onClick={() => void submit(true, replace.tag, replace.kg)}>Replace with {replace.kg} kg</Button>
+              <Button variant="ghost" disabled={busy} onClick={() => { setReplace(null); weightRef.current?.focus(); }}>Keep {replace.existing} kg</Button>
+            </div>
+          </div>
+        )}
+        {saved && (
+          <div role="status" className="rounded border border-forest/30 bg-forest/5 px-4 py-3 text-sm text-forest">
+            <b>{saved.tag}</b> · {saved.kg} kg {saved.offline ? "kept on this device" : "saved"}
+            {saved.note && <p className={`mt-0.5 text-xs ${saved.offline ? "text-forest" : "text-amber-800"}`}>{saved.note}</p>}
+          </div>
+        )}
+        <Button className="w-full py-3 text-base" disabled={busy || !tag.trim() || !weight.trim()} onClick={() => void submit()}>
+          {busy ? "Saving…" : online ? "Save weight" : "Save on this device"}
+        </Button>
+      </div>
+      {recent.length > 0 && (
+        <div className="border-t border-hairline pt-3">
+          <p className="mb-1 text-xs font-medium uppercase tracking-wide text-muted">Recorded in this visit</p>
+          <ul className="divide-y divide-hairline/60 text-sm">
+            {recent.map((r, i) => <li key={`${r.tag}-${i}`} className="flex justify-between py-1.5"><span className="font-mono">{r.tag}</span><span>{r.kg} kg{r.offline ? " · waiting to send" : ""}</span></li>)}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The weigh form for this person: the full one (several animals at once) when their role has "Weigh form: several
+ * animals at once", otherwise one animal at a time. The farm owner sets this per role under Team > Roles. */
+export function WeighDayForm({ layout = "split", title = "Record a weigh day" }: { layout?: "split" | "stacked"; title?: string | null }) {
+  const me = useMe();
+  const can = useCan();
+  if (!me.data) return <p className="text-sm text-muted">Loading…</p>;
+  if (!can("weighform.multi")) return <SingleWeighForm title={title === "Record a weigh day" ? "Record a weight" : title} />;
+  return <MultiWeighForm layout={layout} title={title} />;
 }
 
 /** A slim reminder for pages other than the weigh form: weights saved on this device are waiting to be sent.

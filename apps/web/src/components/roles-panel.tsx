@@ -24,7 +24,8 @@ const SECTION_LABELS: Record<string, string> = {
 /** Permission group for the on/off switches of the tabs on an animal's page (identity/permissions.py). */
 const TAB_GROUP = "animaltabs";
 /** Switches that show things rather than allow actions: a new role starts with all of them on. */
-const isVisibilityCode = (code: string) => code === "notifications.view" || code.startsWith(`${TAB_GROUP}.`);
+const WEIGH_FORM_CODE = "weighform.multi";
+const isVisibilityCode = (code: string) => code === "notifications.view" || code.startsWith(`${TAB_GROUP}.`) || code === WEIGH_FORM_CODE;
 
 /** Pages grouped by the permission that opens them (pages sharing a permission switch together). */
 function pageGroups(): { permission: string; prefixes: string[] }[] {
@@ -120,7 +121,7 @@ function RoleEditor({ role, catalog, onDone }: { role: RoleDetail | null; catalo
   const byGroup = useMemo(() => {
     const m = new Map<string, { code: string; description: string }[]>();
     for (const p of catalog.permissions) {
-      if (gateCodes.has(p.code) || p.group === TAB_GROUP) continue;
+      if (gateCodes.has(p.code) || p.group === TAB_GROUP || p.code === WEIGH_FORM_CODE) continue;
       m.set(p.group_label, [...(m.get(p.group_label) ?? []), p]);
     }
     return Array.from(m);
@@ -194,6 +195,24 @@ function RoleEditor({ role, catalog, onDone }: { role: RoleDetail | null; catalo
               <label key={p.code} className={`${box} ${disabled(p.code) ? "opacity-50" : ""}`}>
                 <input type="checkbox" className="mt-1" checked={selected.has(p.code)} disabled={disabled(p.code)} onChange={() => toggle(p.code)} />
                 <span>{p.code.slice(TAB_GROUP.length + 1).replace(/^./, (c) => c.toUpperCase())}</span>
+              </label>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {catalog.permissions.some((p) => p.code === WEIGH_FORM_CODE) && (
+        <section>
+          <h3 className="mb-1 text-sm font-medium text-ink">Weigh form</h3>
+          <p className="mb-2 text-xs text-muted">How this role records weights. It only changes the form they see: whether they can weigh at all is set below.</p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {([[true, "Several animals at once", "A list of rows: tag and weight for each animal, saved together."],
+               [false, "One animal at a time", "A simple form: enter one tag and weight, save, then the next. Best for slow weighing."]] as const).map(([multi, label, help]) => (
+              <label key={label} className={`${box} ${disabled(WEIGH_FORM_CODE) && multi ? "opacity-50" : ""}`}>
+                <input type="radio" name="weigh-form" className="mt-1" checked={selected.has(WEIGH_FORM_CODE) === multi}
+                  disabled={disabled(WEIGH_FORM_CODE) && multi}
+                  onChange={() => setSelected((prev) => { const n = new Set(prev); multi ? n.add(WEIGH_FORM_CODE) : n.delete(WEIGH_FORM_CODE); return n; })} />
+                <span><span className="font-medium">{label}</span><span className="block text-xs text-muted">{help}</span></span>
               </label>
             ))}
           </div>

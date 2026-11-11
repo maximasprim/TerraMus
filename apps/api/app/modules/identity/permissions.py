@@ -8,6 +8,7 @@ PERMISSIONS: list[tuple[str, str]] = [
     ("livestock.photo", "Add or replace an animal's photo"),
     ("livestock.weigh", "Record an animal's weight"),
     ("weights.view", "Open the Weights report"),
+    ("weighform.multi", "Weigh form: record several animals at once (leave off to record one animal at a time)"),
     ("weights.targets", "Set target weights for batches and animals"),
     ("livestock.delete", "Delete/archive livestock records"),
     ("livestock.sell", "Mark livestock as sold / manage sales"),
@@ -168,3 +169,8 @@ for _role_name, _grants in DEFAULT_ROLE_GRANTS.items():
             _grants.append("weights.view")
         if ("feedlot.manage" in _grants or "livestock.update" in _grants) and "weights.targets" not in _grants:
             _grants.append("weights.targets")
+        # Weigh form: every role that weighs keeps the several-animals-at-once form, except Field Recorder, whose
+        # form records one animal at a time (migration 0051). The farm owner can change this per role.
+        if ("feedlot.weigh" in _grants or "livestock.weigh" in _grants) and _role_name != "Field Recorder" \
+                and "weighform.multi" not in _grants:
+            _grants.append("weighform.multi")
